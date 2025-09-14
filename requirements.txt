@@ -1,0 +1,8 @@
+fastapi==0.104.1
+uvicorn==0.24.0
+requests==2.31.0
+pydantic==2.5.0
+treequest[abmcts-m]==0.1.2
+numpy>=1.26.4
+pyyaml==6.0.1
+websockets==12.0

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AB-MCTS Multi-Model Interface</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .input-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+        textarea, input, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+        textarea {
+            height: 120px;
+            resize: vertical;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .loading span {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #667eea;
+            margin: 0 2px;
+            animation: loading 0.6s infinite alternate;
+        }
+        .loading span:nth-child(2) { animation-delay: 0.2s; }
+        .loading span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes loading {
+            to { transform: translateY(-10px); }
+        }
+        .models-section {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .model-tag {
+            background: #e9ecef;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 12px;
+            color: #495057;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌳 AB-MCTS Multi-Model Interface</h1>
+        
+        <div class="input-group">
+            <label for="query">Your Question or Problem:</label>
+            <textarea id="query" placeholder="Ask a question that you'd like multiple AI models to collaborate on..."></textarea>
+        </div>
+        
+        <div class="input-group">
+            <label for="iterations">MCTS Iterations:</label>
+            <input type="number" id="iterations" value="10" min="1" max="50">
+        </div>
+        
+        <div class="input-group">
+            <label>Models to Use:</label>
+            <div class="models-section">
+                <span class="model-tag">deepseek-r1:1.5b</span>
+                <span class="model-tag">gemma3:1b</span>
+                <span class="model-tag">llama3.2:1b</span>
+            </div>
+        </div>
+        
+        <div class="input-group">
+            <label for="enable_ab_mcts">
+                <input type="checkbox" id="enable_ab_mcts" checked style="width: auto; margin-right: 10px;">
+                Enable AB-MCTS Algorithm
+            </label>
+        </div>
+        
+        <button onclick="processQuery()">🚀 Run Multi-Model Analysis</button>
+        
+        <div class="loading" id="loading">
+            <span></span><span></span><span></span>
+        </div>
+        
+        <div id="result" class="result" style="display: none;"></div>
+    </div>
+
+    <script>
+        async function processQuery() {
+            const query = document.getElementById('query').value.trim();
+            if (!query) {
+                alert('Please enter a question or problem to solve.');
+                return;
+            }
+            
+            const button = document.querySelector('button');
+            const loading = document.getElementById('loading');
+            const result = document.getElementById('result');
+            
+            button.disabled = true;
+            button.textContent = 'Processing...';
+            loading.style.display = 'block';
+            result.style.display = 'none';
+            
+            try {
+                const response = await fetch('http://localhost:8090/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        iterations: parseInt(document.getElementById('iterations').value),
+                        models: ["deepseek-r1:1.5b", "gemma3:1b", "llama3.2:1b"],
+                        enable_ab_mcts: document.getElementById('enable_ab_mcts').checked
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    result.textContent = data.result;
+                    result.style.display = 'block';
+                } else {
+                    result.textContent = `Error: ${data.error}`;
+                    result.style.display = 'block';
+                }
+            } catch (error) {
+                result.textContent = `Connection Error: ${error.message}\n\nMake sure the AB-MCTS service is running on port 8090.`;
+                result.style.display = 'block';
+            } finally {
+                button.disabled = false;
+                button.textContent = '🚀 Run Multi-Model Analysis';
+                loading.style.display = 'none';
+            }
+        }
+        
+        // Allow Enter key to submit
+        document.getElementById('query').addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'Enter') {
+                processQuery();
+            }
+        });
+    </script>
+</body>
+</html>

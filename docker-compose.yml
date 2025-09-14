@@ -1,0 +1,84 @@
+version: '3.8'
+
+networks:
+  openwebui-net:
+    driver: bridge
+
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    ports:
+      - "3000:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - WEBUI_SECRET_KEY=your-secret-key-here
+    volumes:
+      - open-webui:/app/backend/data
+    networks:
+      - openwebui-net
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # AB-MCTS Service (Sakana AI implementation with Thompson Sampling)
+  ab-mcts-service:
+    build: .
+    container_name: ab-mcts-service
+    ports:
+      - "8094:8094"
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    networks:
+      - openwebui-net
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "backend/services/proper_treequest_ab_mcts_service.py"]
+
+  # Multi-Model Service (Proper implementation with sophisticated collaboration)
+  multi-model-service:
+    build: .
+    container_name: multi-model-service
+    ports:
+      - "8090:8090"
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    networks:
+      - openwebui-net
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "backend/services/proper_multi_model_service.py"]
+
+  # Backend Management API
+  backend-api:
+    build: .
+    container_name: backend-api
+    ports:
+      - "8095:8095"
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - BACKEND_API_URL=http://localhost:8095
+    networks:
+      - openwebui-net
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "backend/api/main.py"]
+
+  # HTTP Server for interfaces
+  http-server:
+    build: .
+    container_name: http-server
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./interfaces:/app/interfaces
+    networks:
+      - openwebui-net
+    restart: always
+    command: ["python", "-m", "http.server", "8080", "--directory", "interfaces"]
+
+volumes:
+  open-webui:

@@ -29,6 +29,10 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models import LLMState, QueryRequest, QueryResponse, SearchStats, ConversationTurn, Conversation
 
+# Import model discovery
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from model_discovery import ModelDiscoveryService
+
 app = FastAPI(title="Proper TreeQuest AB-MCTS Service", version="6.0.0")
 
 # Add CORS middleware
@@ -52,7 +56,13 @@ class ProperTreeQuestABMCTSService:
     def __init__(self):
         self.ollama_url = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
         self.conversations = {}
-        self.models = ["deepseek-r1:1.5b", "gemma3:1b", "llama3.2:1b"]
+        
+        # Initialize model discovery
+        self.model_discovery = ModelDiscoveryService(self.ollama_url)
+        
+        # Discover available models and set defaults
+        self.available_models = self.model_discovery.discover_models()
+        self.models = self.model_discovery.get_recommended_models(for_testing=True)
         
         # Sakana AI TreeQuest configuration
         self.algo_config = {
@@ -264,10 +274,57 @@ Enhanced Response:"""
             "search_stats": search_stats
         }
     
+    def update_models(self, model_names: List[str]) -> bool:
+        """Update the models used for AB-MCTS."""
+        try:
+            # Validate models are available
+            validation = self.model_discovery.validate_models(model_names)
+            unavailable = [name for name, available in validation.items() if not available]
+            
+            if unavailable:
+                print(f"Warning: Some models not available: {unavailable}")
+            
+            # Update models list
+            self.models = [name for name in model_names if validation.get(name, False)]
+            
+            if not self.models:
+                print("Error: No valid models selected")
+                return False
+                
+            print(f"Updated models: {self.models}")
+            return True
+            
+        except Exception as e:
+            print(f"Error updating models: {e}")
+            return False
+    
+    def get_available_models(self) -> List[Dict[str, Any]]:
+        """Get list of available models with metadata."""
+        if not self.available_models:
+            self.available_models = self.model_discovery.discover_models()
+        
+        return [
+            {
+                "name": model.name,
+                "size": model.size,
+                "parameters": model.parameters,
+                "speed_rating": model.speed_rating,
+                "quality_rating": model.quality_rating,
+                "recommended_for_testing": model.recommended_for_testing,
+                "recommended_for_production": model.recommended_for_production,
+                "currently_selected": model.name in self.models
+            }
+            for model in self.available_models
+        ]
+    
     def process_query(self, query: str, iterations: int = 20, max_depth: int = 5, 
-                     conversation_id: Optional[str] = None) -> QueryResponse:
+                     conversation_id: Optional[str] = None, models: Optional[List[str]] = None) -> QueryResponse:
         """Process a query using proper TreeQuest AB-MCTS."""
         try:
+            # Update models if provided
+            if models:
+                self.update_models(models)
+            
             # Run proper TreeQuest AB-MCTS search
             result = self.run_proper_treequest_ab_mcts(query, iterations, max_depth)
             
@@ -308,9 +365,69 @@ async def process_query_endpoint(request: QueryRequest):
             query=request.query,
             iterations=request.iterations,
             max_depth=request.max_depth,
-            conversation_id=request.conversation_id
+            conversation_id=request.conversation_id,
+            models=getattr(request, 'models', None)
         )
         return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/models")
+async def get_models():
+    """Get available models with metadata."""
+    try:
+        models = service.get_available_models()
+        return {
+            "success": True,
+            "models": models,
+            "current_models": service.models
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/models/update")
+async def update_models(request: Dict[str, Any]):
+    """Update the models used for AB-MCTS."""
+    try:
+        model_names = request.get("models", [])
+        success = service.update_models(model_names)
+        
+        return {
+            "success": success,
+            "message": "Models updated successfully" if success else "Failed to update models",
+            "current_models": service.models
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/models/test")
+async def test_models(request: Dict[str, Any]):
+    """Test selected models with a simple query."""
+    try:
+        model_names = request.get("models", [])
+        test_query = request.get("query", "What is 2+2?")
+        
+        # Temporarily update models
+        original_models = service.models.copy()
+        service.update_models(model_names)
+        
+        # Run test query
+        response = service.process_query(
+            query=test_query,
+            iterations=5,
+            max_depth=2
+        )
+        
+        # Restore original models
+        service.models = original_models
+        
+        return {
+            "success": True,
+            "test_query": test_query,
+            "test_models": model_names,
+            "response": response.result,
+            "search_stats": response.search_stats
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

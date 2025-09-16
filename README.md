@@ -115,25 +115,26 @@ docker-compose up -d
 ## 📊 Current Status
 
 ### ✅ Completed
-- [x] Basic AB-MCTS implementation using TreeQuest
+- [x] AB-MCTS implementation using TreeQuest
 - [x] Multi-model collaboration service
+- [x] Open WebUI integration as selectable models
+- [x] Backend management dashboard
 - [x] Anti-hallucination system
 - [x] Docker containerization
-- [x] Basic web interfaces
-- [x] Model selection and configuration
+- [x] Dynamic model selection and configuration
+- [x] Real-time monitoring and analytics
 
-### 🚧 In Progress
-- [ ] Open WebUI pipeline integration
-- [ ] Backend management dashboard
-- [ ] Real-time monitoring and analytics
-- [ ] Performance optimization
+### 🚧 Current Issues
+- [ ] **Timeout Problems**: AB-MCTS taking >300 seconds (needs optimization)
+- [ ] **Performance Issues**: Extremely verbose responses
+- [ ] **Response Quality**: Occasional hallucination in outputs
 
-### 📋 TODO
-- [ ] Web search integration
-- [ ] Advanced model management
-- [ ] A/B testing framework
-- [ ] Research tools and analytics
-- [ ] Documentation completion
+### 📋 Next Priorities
+- [ ] Fix timeout issues with streaming responses
+- [ ] Optimize AB-MCTS performance and verbosity
+- [ ] Improve response quality and accuracy
+- [ ] Add loading indicators and better UX
+- [ ] Implement response caching
 
 ## 🤝 Contributing
 

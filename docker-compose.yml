@@ -68,6 +68,54 @@ services:
     command: ["python", "backend/api/main.py"]
 
   # HTTP Server for interfaces
+  # MCP Server for Open WebUI Integration
+  mcp-server:
+    build: .
+    container_name: mcp-server
+    ports:
+      - "8096:8096"
+    environment:
+      - AB_MCTS_SERVICE_URL=http://ab-mcts-service:8094
+      - MULTI_MODEL_SERVICE_URL=http://multi-model-service:8090
+    networks:
+      - openwebui-net
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "backend/mcp_server.py"]
+
+  # Open WebUI Integration Service
+  openwebui-integration:
+    build: .
+    container_name: openwebui-integration
+    ports:
+      - "8097:8097"
+    environment:
+      - AB_MCTS_SERVICE_URL=http://ab-mcts-service:8094
+      - MULTI_MODEL_SERVICE_URL=http://multi-model-service:8090
+    networks:
+      - openwebui-net
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "backend/openwebui_integration.py"]
+
+  # Model Integration Service
+  model-integration:
+    build: .
+    container_name: model-integration
+    ports:
+      - "8098:8098"
+    environment:
+      - AB_MCTS_SERVICE_URL=http://ab-mcts-service:8094
+      - MULTI_MODEL_SERVICE_URL=http://multi-model-service:8090
+    networks:
+      - openwebui-net
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "backend/model_integration.py"]
+
   http-server:
     build: .
     container_name: http-server

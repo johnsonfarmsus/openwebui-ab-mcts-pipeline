@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AB-MCTS & Multi-Model Pipeline Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .header h1 {
+            color: #2c3e50;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header p {
+            color: #7f8c8d;
+            font-size: 1.1rem;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+        }
+
+        .card h2 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .model-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .model-card {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            padding: 15px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .model-card:hover {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        .model-card.selected {
+            border-color: #28a745;
+            background: #d4edda;
+        }
+
+        .model-card h3 {
+            color: #2c3e50;
+            font-size: 1rem;
+            margin-bottom: 5px;
+        }
+
+        .model-card .size {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+        }
+
+        .model-card .ratings {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+        }
+
+        .speed-rating {
+            color: #28a745;
+        }
+
+        .quality-rating {
+            color: #007bff;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .control-group label {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .control-group input, .control-group select {
+            padding: 8px 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            transition: border-color 0.3s ease;
+        }
+
+        .control-group input:focus, .control-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(45deg, #6c757d, #495057);
+        }
+
+        .btn-success {
+            background: linear-gradient(45deg, #28a745, #20c997);
+        }
+
+        .btn-danger {
+            background: linear-gradient(45deg, #dc3545, #fd7e14);
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-healthy {
+            background: #28a745;
+        }
+
+        .status-unhealthy {
+            background: #dc3545;
+        }
+
+        .status-unknown {
+            background: #ffc107;
+        }
+
+        .query-section {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        .query-input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            font-size: 1rem;
+            margin-bottom: 15px;
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .query-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .results {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .results h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+        }
+
+        .results pre {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #e9ecef;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            border-color: #28a745;
+            color: #155724;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            border-color: #dc3545;
+            color: #721c24;
+        }
+
+        .alert-info {
+            background: #d1ecf1;
+            border-color: #17a2b8;
+            color: #0c5460;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .model-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .controls {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🚀 AB-MCTS & Multi-Model Pipeline Dashboard</h1>
+            <p>Advanced AI Pipeline Management with Dynamic Model Selection</p>
+        </div>
+
+        <!-- System Status -->
+        <div class="card">
+            <h2>📊 System Status</h2>
+            <div id="system-status">
+                <div class="loading show">
+                    <div class="spinner"></div>
+                    <p>Checking system status...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard Grid -->
+        <div class="dashboard-grid">
+            <!-- AB-MCTS Configuration -->
+            <div class="card">
+                <h2>🧠 AB-MCTS Configuration</h2>
+                <div id="ab-mcts-models">
+                    <div class="loading show">
+                        <div class="spinner"></div>
+                        <p>Loading AB-MCTS models...</p>
+                    </div>
+                </div>
+                <div class="controls">
+                    <div class="control-group">
+                        <label for="ab-mcts-iterations">Iterations:</label>
+                        <input type="number" id="ab-mcts-iterations" value="20" min="1" max="100">
+                    </div>
+                    <div class="control-group">
+                        <label for="ab-mcts-depth">Max Depth:</label>
+                        <input type="number" id="ab-mcts-depth" value="5" min="1" max="20">
+                    </div>
+                </div>
+                <div class="controls">
+                    <button class="btn" onclick="updateABMCTSModels()">Update AB-MCTS Models</button>
+                    <button class="btn btn-secondary" onclick="testABMCTSModels()">Test Models</button>
+                </div>
+            </div>
+
+            <!-- Multi-Model Configuration -->
+            <div class="card">
+                <h2>🤝 Multi-Model Configuration</h2>
+                <div id="multi-model-models">
+                    <div class="loading show">
+                        <div class="spinner"></div>
+                        <p>Loading Multi-Model models...</p>
+                    </div>
+                </div>
+                <div class="controls">
+                    <button class="btn" onclick="updateMultiModelModels()">Update Multi-Model Models</button>
+                    <button class="btn btn-secondary" onclick="testMultiModelModels()">Test Models</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Management Information -->
+        <div class="query-section">
+            <h2>🔧 Management Information</h2>
+            <div class="alert alert-info">
+                <strong>Note:</strong> This dashboard is for backend management only. To use AB-MCTS and Multi-Model services, please use the Open WebUI interface at <a href="http://localhost:3000" target="_blank">http://localhost:3000</a>.
+            </div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value">🧠</div>
+                    <div class="stat-label">AB-MCTS Service</div>
+                    <div class="stat-value" style="font-size: 0.9rem; margin-top: 10px;">Advanced Tree Search</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">🤝</div>
+                    <div class="stat-label">Multi-Model Service</div>
+                    <div class="stat-value" style="font-size: 0.9rem; margin-top: 10px;">Model Collaboration</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">⚡</div>
+                    <div class="stat-label">MCP Server</div>
+                    <div class="stat-value" style="font-size: 0.9rem; margin-top: 10px;">Open WebUI Integration</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">📊</div>
+                    <div class="stat-label">Backend API</div>
+                    <div class="stat-value" style="font-size: 0.9rem; margin-top: 10px;">Management & Monitoring</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE = 'http://localhost:8095';
+        const AB_MCTS_SERVICE = 'http://localhost:8094';
+        const MULTI_MODEL_SERVICE = 'http://localhost:8090';
+
+        // Global state
+        let abMCTSModels = [];
+        let multiModelModels = [];
+        let selectedABMCTSModels = [];
+        let selectedMultiModelModels = [];
+
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSystemStatus();
+            loadABMCTSModels();
+            loadMultiModelModels();
+        });
+
+        // Load system status
+        async function loadSystemStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/pipelines/status`);
+                const status = await response.json();
+                
+                const statusHtml = `
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value">
+                                <span class="status-indicator ${status.pipelines.ab_mcts.status === 'healthy' ? 'status-healthy' : 'status-unhealthy'}"></span>
+                                ${status.pipelines.ab_mcts.status}
+                            </div>
+                            <div class="stat-label">AB-MCTS Service</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">
+                                <span class="status-indicator ${status.pipelines.multi_model.status === 'healthy' ? 'status-healthy' : 'status-unhealthy'}"></span>
+                                ${status.pipelines.multi_model.status}
+                            </div>
+                            <div class="stat-label">Multi-Model Service</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">${new Date(status.timestamp).toLocaleTimeString()}</div>
+                            <div class="stat-label">Last Updated</div>
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('system-status').innerHTML = statusHtml;
+            } catch (error) {
+                document.getElementById('system-status').innerHTML = `
+                    <div class="alert alert-error">
+                        <strong>Error:</strong> Failed to load system status: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Load AB-MCTS models
+        async function loadABMCTSModels() {
+            try {
+                const response = await fetch(`${AB_MCTS_SERVICE}/models`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    abMCTSModels = data.models;
+                    selectedABMCTSModels = data.current_models || [];
+                    renderABMCTSModels();
+                } else {
+                    throw new Error('Failed to load AB-MCTS models');
+                }
+            } catch (error) {
+                document.getElementById('ab-mcts-models').innerHTML = `
+                    <div class="alert alert-error">
+                        <strong>Error:</strong> Failed to load AB-MCTS models: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Load Multi-Model models
+        async function loadMultiModelModels() {
+            try {
+                const response = await fetch(`${MULTI_MODEL_SERVICE}/models`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    multiModelModels = data.models;
+                    selectedMultiModelModels = data.current_models || [];
+                    renderMultiModelModels();
+                } else {
+                    throw new Error('Failed to load Multi-Model models');
+                }
+            } catch (error) {
+                document.getElementById('multi-model-models').innerHTML = `
+                    <div class="alert alert-error">
+                        <strong>Error:</strong> Failed to load Multi-Model models: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Render AB-MCTS models
+        function renderABMCTSModels() {
+            const container = document.getElementById('ab-mcts-models');
+            const modelsHtml = abMCTSModels.map(model => `
+                <div class="model-card ${selectedABMCTSModels.includes(model.name) ? 'selected' : ''}" 
+                     onclick="toggleABMCTSModel('${model.name}')">
+                    <h3>${model.name}</h3>
+                    <div class="size">${model.size} parameters</div>
+                    <div class="ratings">
+                        <span class="speed-rating">⚡ ${model.speed_rating}/5</span>
+                        <span class="quality-rating">🎯 ${model.quality_rating}/5</span>
+                    </div>
+                </div>
+            `).join('');
+            
+            container.innerHTML = `
+                <div class="model-grid">
+                    ${modelsHtml}
+                </div>
+            `;
+        }
+
+        // Render Multi-Model models
+        function renderMultiModelModels() {
+            const container = document.getElementById('multi-model-models');
+            const modelsHtml = multiModelModels.map(model => `
+                <div class="model-card ${selectedMultiModelModels.includes(model.name) ? 'selected' : ''}" 
+                     onclick="toggleMultiModelModel('${model.name}')">
+                    <h3>${model.name}</h3>
+                    <div class="size">${model.size} parameters</div>
+                    <div class="ratings">
+                        <span class="speed-rating">⚡ ${model.speed_rating}/5</span>
+                        <span class="quality-rating">🎯 ${model.quality_rating}/5</span>
+                    </div>
+                </div>
+            `).join('');
+            
+            container.innerHTML = `
+                <div class="model-grid">
+                    ${modelsHtml}
+                </div>
+            `;
+        }
+
+        // Toggle AB-MCTS model selection
+        function toggleABMCTSModel(modelName) {
+            const index = selectedABMCTSModels.indexOf(modelName);
+            if (index > -1) {
+                selectedABMCTSModels.splice(index, 1);
+            } else {
+                selectedABMCTSModels.push(modelName);
+            }
+            renderABMCTSModels();
+        }
+
+        // Toggle Multi-Model model selection
+        function toggleMultiModelModel(modelName) {
+            const index = selectedMultiModelModels.indexOf(modelName);
+            if (index > -1) {
+                selectedMultiModelModels.splice(index, 1);
+            } else {
+                selectedMultiModelModels.push(modelName);
+            }
+            renderMultiModelModels();
+        }
+
+        // Update AB-MCTS models
+        async function updateABMCTSModels() {
+            if (selectedABMCTSModels.length === 0) {
+                alert('Please select at least one model for AB-MCTS');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${AB_MCTS_SERVICE}/models/update`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ models: selectedABMCTSModels })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    showAlert('AB-MCTS models updated successfully!', 'success');
+                } else {
+                    showAlert(`Failed to update AB-MCTS models: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                showAlert(`Error updating AB-MCTS models: ${error.message}`, 'error');
+            }
+        }
+
+        // Update Multi-Model models
+        async function updateMultiModelModels() {
+            if (selectedMultiModelModels.length === 0) {
+                alert('Please select at least one model for Multi-Model');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${MULTI_MODEL_SERVICE}/models/update`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ models: selectedMultiModelModels })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    showAlert('Multi-Model models updated successfully!', 'success');
+                } else {
+                    showAlert(`Failed to update Multi-Model models: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                showAlert(`Error updating Multi-Model models: ${error.message}`, 'error');
+            }
+        }
+
+        // Test AB-MCTS models
+        async function testABMCTSModels() {
+            if (selectedABMCTSModels.length === 0) {
+                alert('Please select at least one model for AB-MCTS');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${AB_MCTS_SERVICE}/models/test`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        models: selectedABMCTSModels,
+                        query: 'What is 2+2?'
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    showAlert(`AB-MCTS test successful! Response: ${data.response.substring(0, 100)}...`, 'success');
+                } else {
+                    showAlert(`AB-MCTS test failed: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                showAlert(`Error testing AB-MCTS models: ${error.message}`, 'error');
+            }
+        }
+
+        // Test Multi-Model models
+        async function testMultiModelModels() {
+            if (selectedMultiModelModels.length === 0) {
+                alert('Please select at least one model for Multi-Model');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${MULTI_MODEL_SERVICE}/models/test`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        models: selectedMultiModelModels,
+                        query: 'What is 2+2?'
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    showAlert(`Multi-Model test successful! Response: ${data.response.substring(0, 100)}...`, 'success');
+                } else {
+                    showAlert(`Multi-Model test failed: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                showAlert(`Error testing Multi-Model models: ${error.message}`, 'error');
+            }
+        }
+
+        // Management functions only - no query interface
+
+        // Show alert
+        function showAlert(message, type) {
+            const alertClass = `alert-${type}`;
+            const alertHtml = `
+                <div class="alert ${alertClass}">
+                    <strong>${type === 'success' ? 'Success!' : 'Error!'}</strong> ${message}
+                </div>
+            `;
+            
+            // Insert at the top of the container
+            const container = document.querySelector('.container');
+            container.insertAdjacentHTML('afterbegin', alertHtml);
+            
+            // Remove after 5 seconds
+            setTimeout(() => {
+                const alert = container.querySelector('.alert');
+                if (alert) {
+                    alert.remove();
+                }
+            }, 5000);
+        }
+
+        // Auto-refresh system status every 30 seconds
+        setInterval(loadSystemStatus, 30000);
+    </script>
+</body>
+</html>

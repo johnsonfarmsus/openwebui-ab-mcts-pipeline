@@ -56,13 +56,18 @@ async def get_pipeline_status():
 async def ab_mcts_query(query_data: Dict[str, Any]):
     """Process query using AB-MCTS pipeline."""
     try:
+        # Increase timeout for complex AB-MCTS queries
         response = requests.post(
             f"{AB_MCTS_SERVICE_URL}/query",
             json=query_data,
-            timeout=60
+            timeout=120  # 2 minutes for complex AB-MCTS
         )
         response.raise_for_status()
         return response.json()
+    except requests.exceptions.Timeout:
+        raise HTTPException(status_code=504, detail="AB-MCTS service timeout - query took too long")
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(status_code=503, detail="AB-MCTS service unavailable - check if service is running")
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=500, detail=f"AB-MCTS service error: {str(e)}")
 
@@ -73,10 +78,14 @@ async def multi_model_query(query_data: Dict[str, Any]):
         response = requests.post(
             f"{MULTI_MODEL_SERVICE_URL}/query",
             json=query_data,
-            timeout=60
+            timeout=90  # 1.5 minutes for multi-model
         )
         response.raise_for_status()
         return response.json()
+    except requests.exceptions.Timeout:
+        raise HTTPException(status_code=504, detail="Multi-Model service timeout - query took too long")
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(status_code=503, detail="Multi-Model service unavailable - check if service is running")
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Multi-Model service error: {str(e)}")
 
@@ -99,6 +108,83 @@ async def get_multi_model_stats():
         return response.json()
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Failed to get Multi-Model stats: {str(e)}")
+
+# Model Management Endpoints
+@router.get("/ab-mcts/models")
+async def get_ab_mcts_models():
+    """Get available models for AB-MCTS."""
+    try:
+        response = requests.get(f"{AB_MCTS_SERVICE_URL}/models", timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get AB-MCTS models: {str(e)}")
+
+@router.post("/ab-mcts/models/update")
+async def update_ab_mcts_models(request: Dict[str, Any]):
+    """Update models for AB-MCTS."""
+    try:
+        response = requests.post(
+            f"{AB_MCTS_SERVICE_URL}/models/update",
+            json=request,
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update AB-MCTS models: {str(e)}")
+
+@router.post("/ab-mcts/models/test")
+async def test_ab_mcts_models(request: Dict[str, Any]):
+    """Test models for AB-MCTS."""
+    try:
+        response = requests.post(
+            f"{AB_MCTS_SERVICE_URL}/models/test",
+            json=request,
+            timeout=60
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Failed to test AB-MCTS models: {str(e)}")
+
+@router.get("/multi-model/models")
+async def get_multi_model_models():
+    """Get available models for Multi-Model."""
+    try:
+        response = requests.get(f"{MULTI_MODEL_SERVICE_URL}/models", timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get Multi-Model models: {str(e)}")
+
+@router.post("/multi-model/models/update")
+async def update_multi_model_models(request: Dict[str, Any]):
+    """Update models for Multi-Model."""
+    try:
+        response = requests.post(
+            f"{MULTI_MODEL_SERVICE_URL}/models/update",
+            json=request,
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update Multi-Model models: {str(e)}")
+
+@router.post("/multi-model/models/test")
+async def test_multi_model_models(request: Dict[str, Any]):
+    """Test models for Multi-Model."""
+    try:
+        response = requests.post(
+            f"{MULTI_MODEL_SERVICE_URL}/models/test",
+            json=request,
+            timeout=60
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Failed to test Multi-Model models: {str(e)}")
 
 @router.post("/ab-mcts/restart")
 async def restart_ab_mcts(background_tasks: BackgroundTasks):

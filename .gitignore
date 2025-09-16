@@ -70,15 +70,6 @@ tmp/
 .env.test.local
 .env.production.local
 
-# Output directories
-outputs/
-checkpoints/
-costs/
-llm_logs/
-
-# Sakana fork (added as submodule)
-# sakana-fork/ - commented out to allow submodule
-
 # Node modules (if any)
 node_modules/
 

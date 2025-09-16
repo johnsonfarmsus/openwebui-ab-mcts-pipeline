@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AB-MCTS & Multi-Model Tool Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+
+        .tool-section {
+            margin-bottom: 40px;
+            padding: 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            background: #f9f9f9;
+        }
+
+        .tool-section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+
+        input, textarea, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .result {
+            margin-top: 20px;
+            padding: 20px;
+            background: #e8f5e8;
+            border: 2px solid #4caf50;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .error {
+            background: #ffe8e8;
+            border-color: #f44336;
+            color: #d32f2f;
+        }
+
+        .loading {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }
+
+        .model-info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .model-info h3 {
+            margin-bottom: 10px;
+            color: #1976d2;
+        }
+
+        .model-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .model-tag {
+            background: #1976d2;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧠 AB-MCTS & Multi-Model Tool Test</h1>
+        
+        <!-- AB-MCTS Tool -->
+        <div class="tool-section">
+            <h2>🌳 AB-MCTS Tool</h2>
+            <div class="model-info">
+                <h3>Current Models:</h3>
+                <div class="model-list" id="ab-mcts-models">
+                    <div class="loading">Loading models...</div>
+                </div>
+            </div>
+            
+            <div class="input-group">
+                <label for="ab-mcts-query">Query:</label>
+                <textarea id="ab-mcts-query" placeholder="Enter your complex problem here...">What is the optimal strategy for a game of chess if I can see 3 moves ahead?</textarea>
+            </div>
+            
+            <div class="input-group">
+                <label for="ab-mcts-iterations">Iterations (1-100):</label>
+                <input type="number" id="ab-mcts-iterations" value="20" min="1" max="100">
+            </div>
+            
+            <div class="input-group">
+                <label for="ab-mcts-depth">Max Depth (1-20):</label>
+                <input type="number" id="ab-mcts-depth" value="5" min="1" max="20">
+            </div>
+            
+            <div class="button-group">
+                <button class="btn-primary" onclick="runABMCTS()">Run AB-MCTS</button>
+                <button class="btn-secondary" onclick="getABMCTSModels()">Refresh Models</button>
+            </div>
+            
+            <div id="ab-mcts-result" class="result" style="display: none;"></div>
+        </div>
+
+        <!-- Multi-Model Tool -->
+        <div class="tool-section">
+            <h2>🤝 Multi-Model Tool</h2>
+            <div class="model-info">
+                <h3>Current Models:</h3>
+                <div class="model-list" id="multi-model-models">
+                    <div class="loading">Loading models...</div>
+                </div>
+            </div>
+            
+            <div class="input-group">
+                <label for="multi-model-query">Query:</label>
+                <textarea id="multi-model-query" placeholder="Enter your question here...">Explain the concept of quantum computing in simple terms.</textarea>
+            </div>
+            
+            <div class="button-group">
+                <button class="btn-primary" onclick="runMultiModel()">Run Multi-Model</button>
+                <button class="btn-secondary" onclick="getMultiModelModels()">Refresh Models</button>
+            </div>
+            
+            <div id="multi-model-result" class="result" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8097';
+
+        // Load models on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            getABMCTSModels();
+            getMultiModelModels();
+        });
+
+        async function runABMCTS() {
+            const query = document.getElementById('ab-mcts-query').value;
+            const iterations = parseInt(document.getElementById('ab-mcts-iterations').value);
+            const maxDepth = parseInt(document.getElementById('ab-mcts-depth').value);
+            const resultDiv = document.getElementById('ab-mcts-result');
+            
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result loading';
+            resultDiv.textContent = 'Running AB-MCTS... This may take a moment.';
+            
+            try {
+                const response = await fetch(`${API_BASE}/ab-mcts/query`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        iterations: iterations,
+                        max_depth: maxDepth
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultDiv.className = 'result';
+                    resultDiv.textContent = `Result: ${data.result}\n\nSearch Stats:\n${JSON.stringify(data.search_stats, null, 2)}`;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = `Error: ${data.error || 'Unknown error'}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `Connection Error: ${error.message}`;
+            }
+        }
+
+        async function runMultiModel() {
+            const query = document.getElementById('multi-model-query').value;
+            const resultDiv = document.getElementById('multi-model-result');
+            
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result loading';
+            resultDiv.textContent = 'Running Multi-Model... This may take a moment.';
+            
+            try {
+                const response = await fetch(`${API_BASE}/multi-model/query`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultDiv.className = 'result';
+                    resultDiv.textContent = `Result: ${data.result}\n\nSearch Stats:\n${JSON.stringify(data.search_stats, null, 2)}`;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = `Error: ${data.error || 'Unknown error'}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `Connection Error: ${error.message}`;
+            }
+        }
+
+        async function getABMCTSModels() {
+            try {
+                const response = await fetch(`${API_BASE}/ab-mcts/models`);
+                const data = await response.json();
+                
+                const modelsDiv = document.getElementById('ab-mcts-models');
+                if (data.success && data.current_models) {
+                    modelsDiv.innerHTML = data.current_models.map(model => 
+                        `<div class="model-tag">${model}</div>`
+                    ).join('');
+                } else {
+                    modelsDiv.innerHTML = '<div class="loading">Failed to load models</div>';
+                }
+            } catch (error) {
+                document.getElementById('ab-mcts-models').innerHTML = '<div class="loading">Error loading models</div>';
+            }
+        }
+
+        async function getMultiModelModels() {
+            try {
+                const response = await fetch(`${API_BASE}/multi-model/models`);
+                const data = await response.json();
+                
+                const modelsDiv = document.getElementById('multi-model-models');
+                if (data.success && data.current_models) {
+                    modelsDiv.innerHTML = data.current_models.map(model => 
+                        `<div class="model-tag">${model}</div>`
+                    ).join('');
+                } else {
+                    modelsDiv.innerHTML = '<div class="loading">Failed to load models</div>';
+                }
+            } catch (error) {
+                document.getElementById('multi-model-models').innerHTML = '<div class="loading">Error loading models</div>';
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,299 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "AB-MCTS Service API",
+    "description": "Adaptive Branching Monte Carlo Tree Search with Sakana AI TreeQuest implementation",
+    "version": "1.0.0",
+    "contact": {
+      "name": "AB-MCTS Pipeline",
+      "url": "http://localhost:8094"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8094",
+      "description": "AB-MCTS Service"
+    }
+  ],
+  "paths": {
+    "/query": {
+      "post": {
+        "summary": "Run AB-MCTS Query",
+        "description": "Execute a query using Adaptive Branching Monte Carlo Tree Search with multiple AI models",
+        "operationId": "abMctsQuery",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "The question or problem to solve using AB-MCTS",
+                    "example": "What is machine learning?"
+                  },
+                  "iterations": {
+                    "type": "integer",
+                    "description": "Number of search iterations",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20,
+                    "example": 20
+                  },
+                  "max_depth": {
+                    "type": "integer",
+                    "description": "Maximum tree depth",
+                    "minimum": 1,
+                    "maximum": 20,
+                    "default": 5,
+                    "example": 5
+                  },
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "List of models to use (optional)",
+                    "example": ["smollm:135m", "qwen3:0.6b"]
+                  }
+                },
+                "required": ["query"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful AB-MCTS query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "string",
+                      "description": "The generated response"
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "description": "Whether the query was successful"
+                    },
+                    "search_stats": {
+                      "type": "object",
+                      "properties": {
+                        "total_iterations": {
+                          "type": "integer",
+                          "description": "Total number of iterations performed"
+                        },
+                        "width_searches": {
+                          "type": "integer",
+                          "description": "Number of width searches (exploration)"
+                        },
+                        "depth_searches": {
+                          "type": "integer",
+                          "description": "Number of depth searches (exploitation)"
+                        },
+                        "response_time": {
+                          "type": "number",
+                          "description": "Response time in seconds"
+                        },
+                        "best_quality": {
+                          "type": "number",
+                          "description": "Best quality score achieved"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "detail": {
+                      "type": "string",
+                      "description": "Error message"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "detail": {
+                      "type": "string",
+                      "description": "Error message"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models": {
+      "get": {
+        "summary": "Get Available Models",
+        "description": "Retrieve list of available models for AB-MCTS",
+        "operationId": "getAbMctsModels",
+        "responses": {
+          "200": {
+            "description": "List of available models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "description": "Model name"
+                          },
+                          "size": {
+                            "type": "string",
+                            "description": "Model size"
+                          },
+                          "speed_rating": {
+                            "type": "integer",
+                            "description": "Speed rating (1-5)"
+                          },
+                          "quality_rating": {
+                            "type": "integer",
+                            "description": "Quality rating (1-5)"
+                          },
+                          "currently_selected": {
+                            "type": "boolean",
+                            "description": "Whether this model is currently selected"
+                          }
+                        }
+                      }
+                    },
+                    "current_models": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Currently selected models"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models/update": {
+      "post": {
+        "summary": "Update Model Selection",
+        "description": "Update the models used for AB-MCTS",
+        "operationId": "updateAbMctsModels",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "List of model names to select",
+                    "example": ["smollm:135m", "qwen3:0.6b"]
+                  }
+                },
+                "required": ["models"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Models updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "current_models": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health Check",
+        "description": "Check if the AB-MCTS service is healthy",
+        "operationId": "abMctsHealth",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "healthy"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "description": "Error message"
+          }
+        }
+      }
+    }
+  }
+}

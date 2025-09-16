@@ -24,6 +24,10 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models import QueryRequest, QueryResponse, SearchStats
 
+# Import model discovery
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from model_discovery import ModelDiscoveryService
+
 app = FastAPI(title="Proper Multi-Model Service", version="2.0.0")
 
 # Add CORS middleware
@@ -38,26 +42,77 @@ app.add_middleware(
 class ProperMultiModelService:
     def __init__(self):
         self.ollama_url = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
-        self.models = {
-            "deepseek-r1:1.5b": {
-                "name": "DeepSeek-R1",
-                "strength": "reasoning",
-                "temperature": 0.7,
-                "prompt_style": "analytical"
-            },
-            "gemma3:1b": {
-                "name": "Gemma-3",
-                "strength": "efficiency",
-                "temperature": 0.8,
-                "prompt_style": "concise"
-            },
-            "llama3.2:1b": {
-                "name": "Llama-3.2",
-                "strength": "creativity",
-                "temperature": 0.9,
-                "prompt_style": "creative"
-            }
-        }
+        
+        # Initialize model discovery
+        self.model_discovery = ModelDiscoveryService(self.ollama_url)
+        
+        # Discover available models and set defaults
+        self.available_models = self.model_discovery.discover_models()
+        self.models = self._initialize_model_configs()
+        
+        # Set default selected models
+        self.selected_models = self.model_discovery.get_recommended_models(for_testing=True)
+    
+    def _initialize_model_configs(self) -> Dict[str, Dict[str, Any]]:
+        """Initialize model configurations based on discovered models."""
+        configs = {}
+        
+        for model_info in self.available_models:
+            model_name = model_info.name
+            
+            # Set model-specific configurations
+            if "deepseek" in model_name.lower():
+                configs[model_name] = {
+                    "name": "DeepSeek-R1",
+                    "strength": "reasoning",
+                    "temperature": 0.7,
+                    "prompt_style": "analytical"
+                }
+            elif "gemma" in model_name.lower():
+                configs[model_name] = {
+                    "name": "Gemma-3",
+                    "strength": "efficiency", 
+                    "temperature": 0.6,
+                    "prompt_style": "concise"
+                }
+            elif "llama" in model_name.lower():
+                configs[model_name] = {
+                    "name": "Llama-3.2",
+                    "strength": "creativity",
+                    "temperature": 0.8,
+                    "prompt_style": "creative"
+                }
+            elif "qwen" in model_name.lower():
+                configs[model_name] = {
+                    "name": "Qwen-3",
+                    "strength": "multilingual",
+                    "temperature": 0.7,
+                    "prompt_style": "balanced"
+                }
+            elif "granite" in model_name.lower():
+                configs[model_name] = {
+                    "name": "Granite-3.1",
+                    "strength": "code",
+                    "temperature": 0.6,
+                    "prompt_style": "technical"
+                }
+            elif "smollm" in model_name.lower():
+                configs[model_name] = {
+                    "name": "SmolLM",
+                    "strength": "speed",
+                    "temperature": 0.5,
+                    "prompt_style": "direct"
+                }
+            else:
+                # Default configuration for unknown models
+                configs[model_name] = {
+                    "name": model_name.split(":")[0].title(),
+                    "strength": "general",
+                    "temperature": 0.7,
+                    "prompt_style": "balanced"
+                }
+        
+        return configs
         
     def call_ollama(self, model: str, prompt: str, temperature: float = 0.7) -> Dict[str, Any]:
         """Call Ollama API with model-specific parameters."""
@@ -239,12 +294,56 @@ Synthesized Answer:"""
             
             return "\n\n".join(weighted_responses)
     
+    def update_models(self, model_names: List[str]) -> bool:
+        """Update the models used for multi-model collaboration."""
+        try:
+            # Validate models are available
+            validation = self.model_discovery.validate_models(model_names)
+            unavailable = [name for name, available in validation.items() if not available]
+            
+            if unavailable:
+                print(f"Warning: Some models not available: {unavailable}")
+            
+            # Update selected models list
+            self.selected_models = [name for name in model_names if validation.get(name, False)]
+            
+            if not self.selected_models:
+                print("Error: No valid models selected")
+                return False
+                
+            print(f"Updated selected models: {self.selected_models}")
+            return True
+            
+        except Exception as e:
+            print(f"Error updating models: {e}")
+            return False
+    
+    def get_available_models(self) -> List[Dict[str, Any]]:
+        """Get list of available models with metadata."""
+        if not self.available_models:
+            self.available_models = self.model_discovery.discover_models()
+        
+        return [
+            {
+                "name": model.name,
+                "size": model.size,
+                "parameters": model.parameters,
+                "speed_rating": model.speed_rating,
+                "quality_rating": model.quality_rating,
+                "recommended_for_testing": model.recommended_for_testing,
+                "recommended_for_production": model.recommended_for_production,
+                "currently_selected": model.name in self.selected_models,
+                "config": self.models.get(model.name, {})
+            }
+            for model in self.available_models
+        ]
+    
     def process_query(self, query: str, models: Optional[List[str]] = None) -> QueryResponse:
         """Process a query using sophisticated multi-model collaboration."""
         start_time = time.time()
         
-        # Use provided models or all available
-        models_to_use = models or list(self.models.keys())
+        # Use provided models or selected models
+        models_to_use = models or self.selected_models
         
         # Call all models with model-specific prompts
         responses = []
@@ -311,13 +410,69 @@ async def process_query_endpoint(request: QueryRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/models")
+async def get_models():
+    """Get available models with metadata."""
+    try:
+        models = service.get_available_models()
+        return {
+            "success": True,
+            "models": models,
+            "current_models": service.selected_models
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/models/update")
+async def update_models(request: Dict[str, Any]):
+    """Update the models used for multi-model collaboration."""
+    try:
+        model_names = request.get("models", [])
+        success = service.update_models(model_names)
+        
+        return {
+            "success": success,
+            "message": "Models updated successfully" if success else "Failed to update models",
+            "current_models": service.selected_models
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/models/test")
+async def test_models(request: Dict[str, Any]):
+    """Test selected models with a simple query."""
+    try:
+        model_names = request.get("models", [])
+        test_query = request.get("query", "What is 2+2?")
+        
+        # Temporarily update models
+        original_models = service.selected_models.copy()
+        service.update_models(model_names)
+        
+        # Run test query
+        response = service.process_query(query=test_query)
+        
+        # Restore original models
+        service.selected_models = original_models
+        
+        return {
+            "success": True,
+            "test_query": test_query,
+            "test_models": model_names,
+            "response": response.result,
+            "search_stats": response.search_stats
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/stats")
 async def get_stats():
     """Get service statistics."""
     return {
         "service": "proper-multi-model",
         "status": "running",
-        "models": list(service.models.keys()),
+        "available_models": list(service.models.keys()),
+        "selected_models": service.selected_models,
         "model_info": service.models
     }
 

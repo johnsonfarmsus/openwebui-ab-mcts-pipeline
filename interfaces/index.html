@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AB-MCTS & Multi-Model Pipeline System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            text-align: center;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 50px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #2c3e50;
+            font-size: 3rem;
+            margin-bottom: 20px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 1.3rem;
+            margin-bottom: 40px;
+            line-height: 1.6;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 30px;
+            margin: 40px 0;
+        }
+
+        .feature {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 15px;
+            border: 2px solid #e9ecef;
+            transition: all 0.3s ease;
+        }
+
+        .feature:hover {
+            transform: translateY(-5px);
+            border-color: #667eea;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.2);
+        }
+
+        .feature-icon {
+            font-size: 3rem;
+            margin-bottom: 20px;
+        }
+
+        .feature h3 {
+            color: #2c3e50;
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+        }
+
+        .feature p {
+            color: #6c757d;
+            line-height: 1.6;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 40px;
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(45deg, #6c757d, #495057);
+        }
+
+        .btn-success {
+            background: linear-gradient(45deg, #28a745, #20c997);
+        }
+
+        .status {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 30px 0;
+            border-left: 4px solid #667eea;
+        }
+
+        .status h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .status-item:last-child {
+            border-bottom: none;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+
+        .status-healthy {
+            background: #28a745;
+        }
+
+        .status-unhealthy {
+            background: #dc3545;
+        }
+
+        .status-unknown {
+            background: #ffc107;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .subtitle {
+                font-size: 1.1rem;
+            }
+            
+            .card {
+                padding: 30px 20px;
+            }
+            
+            .buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>🚀 AB-MCTS & Multi-Model Pipeline</h1>
+            <p class="subtitle">
+                Advanced AI Pipeline Management with Dynamic Model Selection<br>
+                Powered by Sakana AI's TreeQuest and Open WebUI
+            </p>
+
+            <div class="features">
+                <div class="feature">
+                    <div class="feature-icon">🧠</div>
+                    <h3>AB-MCTS Tree Search</h3>
+                    <p>Advanced Monte Carlo Tree Search with adaptive branching, width and depth exploration, and model collaboration.</p>
+                </div>
+
+                <div class="feature">
+                    <div class="feature-icon">🤝</div>
+                    <h3>Multi-Model Collaboration</h3>
+                    <p>Sophisticated multi-model collaboration with quality-based synthesis and model-specific prompting strategies.</p>
+                </div>
+
+                <div class="feature">
+                    <div class="feature-icon">⚡</div>
+                    <h3>Dynamic Model Selection</h3>
+                    <p>Real-time model discovery and selection with support for 6+ models including SmolLM, Qwen, Granite, and more.</p>
+                </div>
+
+                <div class="feature">
+                    <div class="feature-icon">📊</div>
+                    <h3>Real-time Monitoring</h3>
+                    <p>Comprehensive monitoring, performance tracking, and configuration management through a modern web interface.</p>
+                </div>
+            </div>
+
+            <div class="status" id="system-status">
+                <h3>System Status</h3>
+                <div class="status-item">
+                    <span>AB-MCTS Service</span>
+                    <span id="ab-mcts-status">
+                        <span class="status-indicator status-unknown"></span>
+                        Checking...
+                    </span>
+                </div>
+                <div class="status-item">
+                    <span>Multi-Model Service</span>
+                    <span id="multi-model-status">
+                        <span class="status-indicator status-unknown"></span>
+                        Checking...
+                    </span>
+                </div>
+                <div class="status-item">
+                    <span>Backend API</span>
+                    <span id="backend-status">
+                        <span class="status-indicator status-unknown"></span>
+                        Checking...
+                    </span>
+                </div>
+            </div>
+
+            <div class="buttons">
+                <a href="dashboard.html" class="btn">Open Dashboard</a>
+                <a href="http://localhost:3000" class="btn btn-secondary" target="_blank">Open WebUI</a>
+                <a href="http://localhost:8095/docs" class="btn btn-success" target="_blank">API Documentation</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Check system status
+        async function checkSystemStatus() {
+            try {
+                const response = await fetch('http://localhost:8095/api/pipelines/status');
+                const status = await response.json();
+                
+                updateStatus('ab-mcts-status', status.pipelines.ab_mcts.status);
+                updateStatus('multi-model-status', status.pipelines.multi_model.status);
+                updateStatus('backend-status', 'healthy');
+            } catch (error) {
+                updateStatus('ab-mcts-status', 'unhealthy');
+                updateStatus('multi-model-status', 'unhealthy');
+                updateStatus('backend-status', 'unhealthy');
+            }
+        }
+
+        function updateStatus(elementId, status) {
+            const element = document.getElementById(elementId);
+            const indicator = element.querySelector('.status-indicator');
+            
+            indicator.className = `status-indicator status-${status}`;
+            element.innerHTML = `<span class="status-indicator status-${status}"></span>${status}`;
+        }
+
+        // Check status on load and every 30 seconds
+        checkSystemStatus();
+        setInterval(checkSystemStatus, 30000);
+    </script>
+</body>
+</html>

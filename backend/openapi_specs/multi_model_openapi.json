@@ -1,0 +1,285 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Multi-Model Service API",
+    "description": "Multi-Model collaboration with sophisticated synthesis and quality-based model selection",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Multi-Model Pipeline",
+      "url": "http://localhost:8090"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8090",
+      "description": "Multi-Model Service"
+    }
+  ],
+  "paths": {
+    "/query": {
+      "post": {
+        "summary": "Run Multi-Model Query",
+        "description": "Execute a query using multi-model collaboration where multiple AI models work together",
+        "operationId": "multiModelQuery",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "The question or problem to solve using multi-model collaboration",
+                    "example": "What is machine learning?"
+                  },
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "List of models to use (optional)",
+                    "example": ["smollm:135m", "qwen3:0.6b"]
+                  }
+                },
+                "required": ["query"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful multi-model query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "string",
+                      "description": "The synthesized response from multiple models"
+                    },
+                    "success": {
+                      "type": "boolean",
+                      "description": "Whether the query was successful"
+                    },
+                    "search_stats": {
+                      "type": "object",
+                      "properties": {
+                        "quality_scores": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "number"
+                          },
+                          "description": "Quality scores for each model"
+                        },
+                        "response_time": {
+                          "type": "number",
+                          "description": "Response time in seconds"
+                        },
+                        "models_used": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Models that were used"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "detail": {
+                      "type": "string",
+                      "description": "Error message"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "detail": {
+                      "type": "string",
+                      "description": "Error message"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models": {
+      "get": {
+        "summary": "Get Available Models",
+        "description": "Retrieve list of available models for Multi-Model collaboration",
+        "operationId": "getMultiModelModels",
+        "responses": {
+          "200": {
+            "description": "List of available models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "description": "Model name"
+                          },
+                          "size": {
+                            "type": "string",
+                            "description": "Model size"
+                          },
+                          "speed_rating": {
+                            "type": "integer",
+                            "description": "Speed rating (1-5)"
+                          },
+                          "quality_rating": {
+                            "type": "integer",
+                            "description": "Quality rating (1-5)"
+                          },
+                          "currently_selected": {
+                            "type": "boolean",
+                            "description": "Whether this model is currently selected"
+                          },
+                          "config": {
+                            "type": "object",
+                            "description": "Model configuration"
+                          }
+                        }
+                      }
+                    },
+                    "current_models": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Currently selected models"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models/update": {
+      "post": {
+        "summary": "Update Model Selection",
+        "description": "Update the models used for Multi-Model collaboration",
+        "operationId": "updateMultiModelModels",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "List of model names to select",
+                    "example": ["smollm:135m", "qwen3:0.6b"]
+                  }
+                },
+                "required": ["models"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Models updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "current_models": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health Check",
+        "description": "Check if the Multi-Model service is healthy",
+        "operationId": "multiModelHealth",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "healthy"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "description": "Error message"
+          }
+        }
+      }
+    }
+  }
+}

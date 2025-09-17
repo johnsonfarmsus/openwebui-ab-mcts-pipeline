@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Research Guide</title>
+    <style>
+        body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; background: #f5f7fb; }
+        .container { max-width: 900px; margin: 0 auto; padding: 24px; }
+        .card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 8px 24px rgba(0,0,0,0.06); }
+        .nav { display:flex; justify-content: space-between; align-items:center; margin-bottom:16px; }
+        .nav a { color: #556; text-decoration: none; margin-right: 12px; }
+        .btn { background: linear-gradient(45deg, #667eea, #764ba2); color:#fff; padding:10px 14px; border-radius:8px; text-decoration:none; }
+        .md { line-height: 1.65; color:#222; }
+        .md h1, .md h2, .md h3 { color:#2c3e50; }
+        .md pre { background:#2c3e50; color:#ecf0f1; padding:12px; border-radius:8px; overflow:auto; }
+        .md code { background:#f0f3f8; padding:2px 4px; border-radius:4px; }
+        .md a { color:#4466ee; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <div><a href="/dashboard.html">← Back to Dashboard</a></div>
+            <div>
+                <a href="/evals.html">Evals</a>
+                <a href="http://localhost:3001" target="_blank" rel="noopener">Grafana</a>
+                <a href="http://localhost:9090" target="_blank" rel="noopener">Prometheus</a>
+                <a class="btn" href="/research.html">Research Guide</a>
+            </div>
+        </div>
+        <div class="card">
+            <div id="content" class="md">Loading Research Guide...</div>
+        </div>
+    </div>
+    <script>
+        async function loadGuide() {
+            try {
+                const res = await fetch('/RESEARCH_GUIDE.md');
+                if (!res.ok) throw new Error('Guide not found');
+                const md = await res.text();
+                document.getElementById('content').innerHTML = marked.parse(md);
+            } catch (e) {
+                document.getElementById('content').innerHTML = `<div style="color:#c00;">Failed to load Research Guide: ${e.message}</div>`;
+            }
+        }
+        loadGuide();
+    </script>
+</body>
+</html>
+

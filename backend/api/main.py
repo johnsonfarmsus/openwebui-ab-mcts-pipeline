@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
+from starlette.responses import Response
 import os
 from typing import Dict, Any
 
@@ -22,7 +23,7 @@ from backend.api.config import router as config_router
 # New: runs endpoints
 from fastapi import APIRouter
 from backend.services.experiment_logger import ExperimentLogger
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST, CollectorRegistry
 
 # Create FastAPI app
 app = FastAPI(
@@ -32,17 +33,20 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc"
 )
-# --- Prometheus metrics ---
+# --- Prometheus metrics (use dedicated registry to avoid duplicate registration) ---
+PROM_REGISTRY = CollectorRegistry()
 HTTP_REQUESTS = Counter(
     "backend_http_requests_total",
     "Total HTTP requests",
     ["method", "path", "status"],
+    registry=PROM_REGISTRY,
 )
 HTTP_LATENCY = Histogram(
     "backend_http_request_latency_seconds",
     "HTTP request latency in seconds",
     ["method", "path"],
     buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600),
+    registry=PROM_REGISTRY,
 )
 
 @app.middleware("http")
@@ -61,7 +65,7 @@ async def prometheus_middleware(request: Request, call_next):
 
 @app.get("/metrics")
 async def metrics():
-    return FastAPI.responses.Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    return Response(generate_latest(PROM_REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
 # Add CORS middleware
 app.add_middleware(

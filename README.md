@@ -10,6 +10,7 @@ This project implements **Sakana AI's AB-MCTS (Adaptive Branching Monte Carlo Tr
 - **Unified Backend**: Management dashboard for both pipelines
 - **Open WebUI Integration**: Native chat interface with model selection
 - **Real-time Monitoring**: Performance analytics and search tree visualization
+- **Scientific Enrichment (optional)**: Auto-enriches prompts/results using RDKit (chemistry) and Materials Project (materials) when relevant, with graceful fallback if unavailable
 
 ## 🏗️ Architecture
 
@@ -168,6 +169,10 @@ docker-compose up -d
   - `GET http://localhost:8095/api/runs/{run_id}`
   - `GET http://localhost:8095/api/runs/{run_id}/events?head=200`
   - `GET http://localhost:8095/api/monitoring/passk?k=50&hours=24` (simple Pass@k rollup)
+
+## 📚 Research Guide
+
+See `docs/research/RESEARCH_GUIDE.md` for how to analyze runs, use the evals page, query Pass@k, and interpret Prometheus/Grafana dashboards.
 
 ## 🔬 Science Tools (optional)
 

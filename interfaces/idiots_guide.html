@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Idiot's Guide: Quick Install & Use</title>
+    <style>
+        body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 0; background: #f5f7fb; color:#222; }
+        .container { max-width: 900px; margin: 0 auto; padding: 24px; }
+        .card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 8px 24px rgba(0,0,0,0.06); margin-bottom:16px; }
+        h1, h2 { color:#2c3e50; }
+        code, pre { background:#f0f3f8; padding:2px 4px; border-radius:4px; }
+        pre { padding:12px; overflow:auto; white-space: pre-wrap; }
+        .btn { background: linear-gradient(45deg, #667eea, #764ba2); color:#fff; padding:10px 14px; border-radius:8px; text-decoration:none; }
+        .links a { margin-right: 12px; }
+        ol li { margin: 6px 0; }
+        .tip { background:#fff8e1; border-left:4px solid #f6c343; padding:10px 12px; border-radius:8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>Idiot's Guide: Quick Install & Use</h1>
+            <p>This is a super-simple, click-through guide to get everything running and connected.</p>
+            <div class="links">
+                <a class="btn" href="/dashboard.html">Open Dashboard</a>
+                <a class="btn" href="http://localhost:3000" target="_blank" rel="noopener">Open WebUI</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>1) Install prerequisites</h2>
+            <ol>
+                <li>Install <a href="https://docs.docker.com/get-docker/" target="_blank" rel="noopener">Docker Desktop</a></li>
+                <li>Install <a href="https://ollama.com/download" target="_blank" rel="noopener">Ollama</a> and start it</li>
+            </ol>
+        </div>
+
+        <div class="card">
+            <h2>2) Start everything</h2>
+            <p>Open a terminal and run:</p>
+            <pre>git clone &lt;your-repo-url&gt;
+cd openwebui-setup
+docker compose up -d</pre>
+            <p>Wait ~1–2 minutes for services to start. Then open:</p>
+            <ul>
+                <li>Dashboard: <code>http://localhost:8081/dashboard.html</code></li>
+                <li>Open WebUI: <code>http://localhost:3000</code></li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2>3) Set up Open WebUI connections (in the UI)</h2>
+            <p>In Open WebUI, click the gear icon (bottom-left), then do these:</p>
+            <ol>
+                <li>Admin Settings → External Tools → add <code>http://localhost:8097</code>, click <strong>Verify Connection</strong>, then <strong>Save</strong></li>
+                <li>Settings → Connections → add <code>http://localhost:8098</code>, click <strong>Verify Connection</strong>, then <strong>Save</strong></li>
+                <li>Settings → External Tools → add <code>http://localhost:8097</code>, click <strong>Verify Connection</strong>, then <strong>Save</strong></li>
+            </ol>
+            <div class="tip">
+                <strong>What are these?</strong>
+                <ul>
+                    <li><code>8098</code> = Model Integration (OpenAI-compatible) to select "models" like AB‑MCTS and Multi‑Model inside chat</li>
+                    <li><code>8097</code> = Tool endpoints (OpenAPI) for calling AB‑MCTS, Multi‑Model, and science helpers as tools</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>4) Try it</h2>
+            <ol>
+                <li>Open WebUI → pick a model (e.g., "AB‑MCTS" or "Multi‑Model")</li>
+                <li>Ask a question. For AB‑MCTS, expect a slower but deeper response.</li>
+                <li>Visit Evals: <a href="/evals.html">/evals.html</a> for charts and the tree view</li>
+                <li>Open Grafana: <a href="http://localhost:3001" target="_blank" rel="noopener">http://localhost:3001</a> and switch to the AB‑MCTS dashboard</li>
+            </ol>
+        </div>
+
+        <div class="card">
+            <h2>5) Common fixes</h2>
+            <ul>
+                <li>Nothing loads? Run <code>docker compose ps</code> to ensure all containers are Up</li>
+                <li>Prometheus/Grafana not loading? Wait 30–60 seconds after <code>docker compose up -d</code></li>
+                <li>Open WebUI errors? Re-check the two connection URLs and click <strong>Verify Connection</strong></li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2>Links</h2>
+            <ul>
+                <li>API Docs: <a href="http://localhost:8095/api/docs" target="_blank" rel="noopener">http://localhost:8095/api/docs</a></li>
+                <li>Prometheus: <a href="http://localhost:9090" target="_blank" rel="noopener">http://localhost:9090</a></li>
+                <li>Grafana: <a href="http://localhost:3001" target="_blank" rel="noopener">http://localhost:3001</a></li>
+                <li>Research Guide (GitHub): <a href="https://github.com/johnsonfarmsus/openwebui-ab-mcts-pipeline/blob/main/docs/research/RESEARCH_GUIDE.md" target="_blank" rel="noopener">docs/research/RESEARCH_GUIDE.md</a></li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>
+

@@ -174,6 +174,13 @@ docker-compose up -d
 
 See `docs/research/RESEARCH_GUIDE.md` for how to analyze runs, use the evals page, query Pass@k, and interpret Prometheus/Grafana dashboards.
 
+## 🧒 Idiot's Guide (Noobs Welcome)
+
+Open a simple, step-by-step install and connect guide at `http://localhost:8081/idiots_guide.html` once Docker is up. It covers Docker/Ollama prerequisites, `docker compose up -d`, and the Open WebUI UI steps:
+- Admin Settings → External Tools → `http://localhost:8097` → Verify Connection → Save
+- Settings → Connections → `http://localhost:8098` → Verify Connection → Save
+- Settings → External Tools → `http://localhost:8097` → Verify Connection → Save
+
 ## 🔬 Science Tools (optional)
 
 Two helper tools are exposed for sanity checks in chemistry and materials:

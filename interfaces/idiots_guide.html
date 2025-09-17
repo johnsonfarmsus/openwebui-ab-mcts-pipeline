@@ -31,6 +31,7 @@
         <div class="card">
             <h2>1) Install prerequisites</h2>
             <ol>
+                <li>Install <a href="https://git-scm.com/downloads" target="_blank" rel="noopener">Git</a> <span style="color:#666;">(macOS: you can also run <code>xcode-select --install</code>)</span></li>
                 <li>Install <a href="https://docs.docker.com/get-docker/" target="_blank" rel="noopener">Docker Desktop</a></li>
                 <li>Install <a href="https://ollama.com/download" target="_blank" rel="noopener">Ollama</a> and start it</li>
             </ol>
@@ -39,13 +40,13 @@
         <div class="card">
             <h2>2) Start everything</h2>
             <p>Open a terminal and run:</p>
-            <pre>git clone &lt;your-repo-url&gt;
-cd openwebui-setup
+            <pre>git clone https://github.com/johnsonfarmsus/openwebui-ab-mcts-pipeline.git
+cd openwebui-ab-mcts-pipeline
 docker compose up -d</pre>
             <p>Wait ~1–2 minutes for services to start. Then open:</p>
             <ul>
-                <li>Dashboard: <code>http://localhost:8081/dashboard.html</code></li>
-                <li>Open WebUI: <code>http://localhost:3000</code></li>
+                <li>Dashboard: <a href="http://localhost:8081/dashboard.html">http://localhost:8081/dashboard.html</a></li>
+                <li>Open WebUI: <a href="http://localhost:3000">http://localhost:3000</a></li>
             </ul>
         </div>
 
@@ -69,6 +70,7 @@ docker compose up -d</pre>
         <div class="card">
             <h2>4) Try it</h2>
             <ol>
+                <li>Open the <a href="/dashboard.html">Dashboard</a> → select AB‑MCTS models, set <strong>Iterations</strong> and <strong>Max Depth</strong>, then click <strong>Update AB-MCTS Models</strong> and <strong>Update Parameters</strong></li>
                 <li>Open WebUI → pick a model (e.g., "AB‑MCTS" or "Multi‑Model")</li>
                 <li>Ask a question. For AB‑MCTS, expect a slower but deeper response.</li>
                 <li>Visit Evals: <a href="/evals.html">/evals.html</a> for charts and the tree view</li>

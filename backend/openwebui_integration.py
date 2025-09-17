@@ -178,7 +178,8 @@ async def list_tools():
             {"name": "ab_mcts", "description": "Advanced tree search for complex problem solving", "endpoint": "/tools/ab_mcts"},
             {"name": "multi_model", "description": "Collaborative AI for comprehensive answers", "endpoint": "/tools/multi_model"},
             {"name": "chem_lipinski_pains", "description": "Check SMILES for Lipinski rule-of-five and PAINS alerts", "endpoint": "/tools/chem/lipinski_pains"},
-            {"name": "materials_project_lookup", "description": "Lookup materials by formula or mp-id using the Materials Project API", "endpoint": "/tools/materials/lookup"},
+            {"name": "materials_project_lookup", "description": "Lookup materials by formula, mp-id, or elements using the Materials Project API", "endpoint": "/tools/materials/lookup"},
+            {"name": "pubchem_lookup", "description": "Resolve chemical name via PubChem and return short description/properties", "endpoint": "/tools/pubchem/lookup"},
         ]
     }
 
@@ -247,9 +248,9 @@ async def chem_lipinski_pains(payload: Dict[str, Any]):
 # --- Materials Project lookup ---
 @app.post("/tools/materials/lookup")
 async def materials_lookup(payload: Dict[str, Any]):
-    """Lookup by formula or mp-id via Materials Project v2 API (if key set).
+    """Lookup by formula, mp-id, or elements via Materials Project v2 API (if key set).
 
-    Request: {"formula": "LiFePO4"} or {"mp_id": "mp-149"}
+    Request: {"formula": "LiFePO4"} or {"mp_id": "mp-149"} or {"elements": "Pm"} or {"elements": ["Li","Fe","O"]}
     """
     if not MATERIALS_PROJECT_API_KEY:
         return {"success": False, "error": "MATERIALS_PROJECT_API_KEY not set"}
@@ -277,10 +278,79 @@ async def materials_lookup(payload: Dict[str, Any]):
                 r = await client.get(f"{base}/materials/summary/?formula={formula}&fields={fields}")
                 r.raise_for_status()
                 return {"success": True, "data": r.json()}
+            elif payload.get("elements"):
+                els = payload["elements"]
+                if isinstance(els, list):
+                    els_param = "-".join(els)
+                else:
+                    els_param = str(els)
+                # Query materials containing these elements. We will trim client-side.
+                r = await client.get(f"{base}/materials/summary/?elements={els_param}&fields={fields}")
+                r.raise_for_status()
+                return {"success": True, "data": r.json()}
             else:
                 raise HTTPException(status_code=400, detail="Provide 'formula' or 'mp_id'")
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"Materials Project HTTP error: {str(e)}")
+
+# --- PubChem lookup (no API key required) ---
+@app.post("/tools/pubchem/lookup")
+async def pubchem_lookup(payload: Dict[str, Any]):
+    """Resolve a chemical name via PubChem and return a concise summary.
+
+    Request: {"name": "promethium"}
+    """
+    name = (payload or {}).get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Missing 'name'")
+    base = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            # Resolve to a CID
+            r = await client.get(f"{base}/compound/name/{httpx.utils.quote(name, safe='')}/cids/JSON")
+            r.raise_for_status()
+            cids = r.json().get("IdentifierList", {}).get("CID", [])
+            if not cids:
+                return {"success": False, "error": "not_found"}
+            cid = cids[0]
+            # Get description (PUG View) and a few properties
+            desc_r = await client.get(f"{base}/view/data/compound/{cid}/JSON")
+            props_r = await client.get(f"{base}/compound/cid/{cid}/property/MolecularFormula,MolecularWeight,IsotopeAtomCount,InChIKey/JSON")
+            desc = ""
+            try:
+                view = desc_r.json()
+                # Extract first non-empty description string we can find
+                records = view.get("Record", {}).get("Section", [])
+                # Heuristic scan
+                def find_text(sections):
+                    for sec in sections or []:
+                        if "Information" in sec:
+                            for info in sec["Information"]:
+                                val = (info.get("Value", {}) or {}).get("StringWithMarkup", [])
+                                if val:
+                                    txt = " ".join([v.get("String", "") for v in val]).strip()
+                                    if txt:
+                                        return txt
+                        inner = sec.get("Section")
+                        txt = find_text(inner)
+                        if txt:
+                            return txt
+                    return ""
+                desc = find_text(records) or ""
+            except Exception:
+                desc = ""
+            props = {}
+            try:
+                props_data = props_r.json().get("PropertyTable", {}).get("Properties", [{}])[0]
+                props = {k: props_data.get(k) for k in ("MolecularFormula", "MolecularWeight", "InChIKey", "IsotopeAtomCount")}
+            except Exception:
+                props = {}
+            # Trim description for prompt safety
+            if desc and len(desc) > 600:
+                desc = desc[:600] + "…"
+            return {"success": True, "cid": cid, "description": desc, "properties": props}
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"PubChem HTTP error: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8097)

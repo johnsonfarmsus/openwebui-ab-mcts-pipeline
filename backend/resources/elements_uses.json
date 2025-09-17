@@ -1,0 +1,9 @@
+{
+  "H": {"name": "hydrogen", "symbol": "H", "atomic_number": 1, "uses": "Fuel, ammonia production, hydrogenation, rocket propellant."},
+  "Li": {"name": "lithium", "symbol": "Li", "atomic_number": 3, "uses": "Rechargeable batteries, alloys, ceramics, psychiatric medication (carbonate)."},
+  "Fe": {"name": "iron", "symbol": "Fe", "atomic_number": 26, "uses": "Steel production, construction, machinery; biological oxygen transport (heme)."},
+  "Pm": {"name": "promethium", "symbol": "Pm", "atomic_number": 61, "uses": "Beta source (Pm‑147) for nuclear batteries, luminous paint/self‑powered devices (historical), thickness gauges, scientific research; no stable isotopes."},
+  "Cu": {"name": "copper", "symbol": "Cu", "atomic_number": 29, "uses": "Electrical wiring, heat exchangers, plumbing, alloys (bronze, brass)."},
+  "C": {"name": "carbon", "symbol": "C", "atomic_number": 6, "uses": "Structural materials (graphite, fiber), energy materials, polymers; biological basis of life."}
+}
+

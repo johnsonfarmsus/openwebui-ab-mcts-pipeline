@@ -108,6 +108,7 @@ experiment_logger = ExperimentLogger()
 
 # ---------------------- Auto-tools helpers ----------------------
 import re
+import json as _json
 
 def _looks_like_smiles(text: str) -> bool:
     """Heuristic for SMILES strings (relaxed to include simple tokens like CCO)."""
@@ -151,6 +152,31 @@ def _extract_material_query(message: str) -> Optional[Dict[str, str]]:
     m = re.search(r"\b(?:[A-Z][a-z]?\d{0,3}){1,4}\b", msg)
     if m:
         return {"formula": m.group(0)}
+    return None
+
+# --- Element detection and local knowledge ---
+_ELEMENTS_PATH = "/app/backend/resources/elements_uses.json"
+try:
+    with open(_ELEMENTS_PATH, "r", encoding="utf-8") as f:
+        _ELEMENTS_MAP: Dict[str, Dict[str, Any]] = _json.load(f)
+except Exception:
+    _ELEMENTS_MAP = {}
+
+_NAME_TO_SYMBOL: Dict[str, str] = {v.get("name", "").lower(): k for k, v in _ELEMENTS_MAP.items()}
+
+def _detect_element(message: str) -> Optional[Dict[str, Any]]:
+    msg = (message or "").lower()
+    # Try exact word match on element names first
+    for name, sym in _NAME_TO_SYMBOL.items():
+        # match whole words to avoid substring collisions
+        if re.search(r"\b" + re.escape(name) + r"\b", msg):
+            rec = _ELEMENTS_MAP.get(sym) or {}
+            return {"symbol": sym, "record": rec}
+    # Also allow lone symbol (case-sensitive common symbols like Pm)
+    for sym in _ELEMENTS_MAP.keys():
+        if re.search(r"\b" + re.escape(sym) + r"\b", message):
+            rec = _ELEMENTS_MAP.get(sym) or {}
+            return {"symbol": sym, "record": rec}
     return None
 
 async def maybe_enrich_with_tools(user_message: str) -> (str, List[Dict[str, Any]]):
@@ -201,6 +227,40 @@ async def maybe_enrich_with_tools(user_message: str) -> (str, List[Dict[str, Any
             events.append({"type": "tool", "tool": "materials_lookup", "ok": False, "error": "no_formula_or_mp_id"})
     except Exception as e:
         events.append({"type": "tool", "tool": "materials_lookup", "ok": False, "error": str(e)})
+    # If no formula/mp-id found, attempt element detection and augment via MP and local knowledge
+    try:
+        if not any(ev.get("tool") == "materials_lookup" and ev.get("ok") for ev in events):
+            ed = _detect_element(user_message)
+            if ed and ed.get("symbol"):
+                symbol = ed["symbol"]
+                # Local short uses summary
+                rec = ed.get("record") or {}
+                if rec.get("uses"):
+                    prefix_parts.append(f"Element {rec.get('name','')} ({symbol}) uses: {rec['uses']}")
+                    events.append({"type": "tool", "tool": "element_uses", "args": {"symbol": symbol}, "ok": True})
+                # Query Materials Project by elements for short preview
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    r = await client.post(f"{OPENWEBUI_INTEGRATION_URL}/tools/materials/lookup", json={"elements": symbol})
+                    if r.status_code == 200 and r.json().get("success"):
+                        d = r.json().get("data")
+                        rows = []
+                        if isinstance(d, dict) and "data" in d and isinstance(d["data"], list):
+                            rows = d["data"][:3]
+                        elif isinstance(d, list):
+                            rows = d[:3]
+                        if rows:
+                            lines = []
+                            for row in rows:
+                                rid = row.get("material_id") or row.get("material", "?")
+                                formula = row.get("formula_pretty", "?")
+                                bg = row.get("band_gap")
+                                dens = row.get("density")
+                                lines.append(f"- {rid} {formula} bg={bg} density={dens}")
+                            prefix_parts.append(f"Materials Project (elements={symbol}) sample:\n" + "\n".join(lines))
+                            events.append({"type": "tool", "tool": "materials_lookup", "args": {"elements": symbol}, "ok": True})
+    except Exception as e:
+        events.append({"type": "tool", "tool": "element_augment", "ok": False, "error": str(e)})
+
     # RDKit Lipinski/PAINS (always attempt if any SMILES-like token exists)
     try:
         smiles = _extract_smiles_candidates(user_message)
@@ -388,7 +448,9 @@ async def handle_chat_completions(request: ChatRequest):
     tool_events: List[Dict[str, Any]] = []
     if configuration.get("auto_tools_enabled", True):
         tool_context, tool_events = await maybe_enrich_with_tools(user_message)
-    enriched_message = (f"[Tool context follows]\n{tool_context}\n\nUser question: {user_message}" if tool_context else user_message)
+    # Confidence heuristic: attach tool context if we have at least one ok event, else skip
+    has_ok = any(ev.get("ok") for ev in tool_events)
+    enriched_message = (f"[Tool context follows]\n{tool_context}\n\nUser question: {user_message}" if (tool_context and has_ok) else user_message)
 
     # Streaming path (OpenAI-compatible SSE stream)
     if getattr(request, "stream", False):
@@ -487,6 +549,10 @@ async def stream_ab_mcts(user_message: str, request: ChatRequest, tool_context: 
         )
         experiment_logger.log_event(run_id, {"type": "request_sent", "payload": {k: (v if k != 'query' else str(v)[:400]) for k, v in payload.items()}})
         for ev in (tool_events or []):
+            # Telemetry: mark source and confidence for enrichment events
+            if ev.get("type") == "tool":
+                ev.setdefault("source", "auto_enrich")
+                ev.setdefault("confidence", "high" if ev.get("ok") else "low")
             experiment_logger.log_event(run_id, ev)
 
         # Periodic keepalive/progress pings

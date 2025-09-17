@@ -2,7 +2,7 @@
 Main FastAPI application for backend management.
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -40,11 +40,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
-app.include_router(pipelines_router, prefix="/api/pipelines", tags=["pipelines"])
-app.include_router(monitoring_router, prefix="/api/monitoring", tags=["monitoring"])
-app.include_router(models_router, prefix="/api/models", tags=["models"])
-app.include_router(config_router, prefix="/api/config", tags=["configuration"])
+# --- Security & Rate Limiting ---
+# API key check: set BACKEND_API_KEY env var to enforce; if empty, allow all
+async def verify_api_key(x_api_key: str | None = Header(None)):
+    expected_key = os.getenv("BACKEND_API_KEY", "").strip()
+    if expected_key:
+        if not x_api_key or x_api_key != expected_key:
+            raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    return True
+
+# Simple per-IP, per-path rate limit (best-effort, in-memory)
+_RATE_LIMIT_BUCKET: dict[tuple[str, str], list[float]] = {}
+_RATE_LIMIT_MAX = int(os.getenv("BACKEND_RATE_LIMIT_PER_MIN", "120"))
+
+async def rate_limit(request: Request):
+    try:
+        client_ip = request.client.host if request.client else "unknown"
+    except Exception:
+        client_ip = "unknown"
+    path = request.url.path
+    key = (client_ip, path)
+    now = time.time()
+    window_start = now - 60.0
+    bucket = _RATE_LIMIT_BUCKET.setdefault(key, [])
+    # prune old entries
+    i = 0
+    for i in range(len(bucket)):
+        if bucket[i] >= window_start:
+            break
+    if i > 0:
+        del bucket[:i]
+    if len(bucket) >= _RATE_LIMIT_MAX:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    bucket.append(now)
+    return True
+
+# Include routers with security dependencies
+secured_deps = [Depends(verify_api_key), Depends(rate_limit)]
+app.include_router(pipelines_router, prefix="/api/pipelines", tags=["pipelines"], dependencies=secured_deps)
+app.include_router(monitoring_router, prefix="/api/monitoring", tags=["monitoring"], dependencies=secured_deps)
+app.include_router(models_router, prefix="/api/models", tags=["models"], dependencies=secured_deps)
+app.include_router(config_router, prefix="/api/config", tags=["configuration"], dependencies=secured_deps)
 
 # Runs API
 runs_router = APIRouter()

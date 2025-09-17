@@ -20,7 +20,7 @@ router = APIRouter()
 # Initialize model manager
 model_manager = ModelManager()
 
-# Enhanced model management endpoints using ModelManager
+# Enhanced model management endpoints using ModelManager (single source of truth)
 
 @router.get("/")
 async def list_models():
@@ -43,23 +43,17 @@ async def get_model(model_id: str):
 @router.post("/")
 async def create_model(model_data: Dict[str, Any]):
     """Create a new model."""
-    # Generate ID if not provided
     if "id" not in model_data:
         model_data["id"] = str(uuid.uuid4())
-    
-    # Validate required fields
     required_fields = ["name", "endpoint", "parameters"]
     for field in required_fields:
         if field not in model_data:
             raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
-    
-    # Check if model ID already exists
-    if model_data["id"] in models_db:
+    if model_data["id"] in model_manager.models:
         raise HTTPException(status_code=409, detail="Model with this ID already exists")
-    
     try:
         model = ModelConfig.from_dict(model_data)
-        models_db[model.id] = model
+        model_manager.models[model.id] = model
         return model.to_dict()
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid model data: {str(e)}")
@@ -67,78 +61,31 @@ async def create_model(model_data: Dict[str, Any]):
 @router.put("/{model_id}")
 async def update_model(model_id: str, model_data: Dict[str, Any]):
     """Update an existing model."""
-    if model_id not in models_db:
+    if model_id not in model_manager.models:
         raise HTTPException(status_code=404, detail="Model not found")
-    
-    # Get existing model
-    existing_model = models_db[model_id]
-    
-    # Update fields
+    existing_model = model_manager.models[model_id]
     for field, value in model_data.items():
         if hasattr(existing_model, field):
             setattr(existing_model, field, value)
-    
-    # Recalculate performance score
     existing_model.performance_score = existing_model.calculate_performance_score()
-    
     return existing_model.to_dict()
 
 @router.delete("/{model_id}")
 async def delete_model(model_id: str):
     """Delete a model."""
-    if model_id not in models_db:
+    if model_id not in model_manager.models:
         raise HTTPException(status_code=404, detail="Model not found")
-    
-    # Check if it's a default model
-    if model_id in [model["id"] for model in default_models]:
-        raise HTTPException(status_code=400, detail="Cannot delete default model")
-    
-    del models_db[model_id]
+    del model_manager.models[model_id]
     return {"message": "Model deleted successfully"}
 
-@router.post("/{model_id}/test")
-async def test_model(model_id: str, test_data: Dict[str, Any]):
-    """Test a model with a sample query."""
-    if model_id not in models_db:
-        raise HTTPException(status_code=404, detail="Model not found")
-    
-    model = models_db[model_id]
-    test_query = test_data.get("query", "Hello, how are you?")
-    
-    try:
-        # This would typically make an actual API call to the model
-        # For now, we'll simulate a response
-        import time
-        start_time = time.time()
-        
-        # Simulate API call
-        await asyncio.sleep(0.1)  # Simulate network delay
-        
-        response_time = time.time() - start_time
-        
-        # Update model usage
-        model.update_usage(success=True)
-        
-        return {
-            "model_id": model_id,
-            "test_query": test_query,
-            "response": "This is a simulated response for testing purposes.",
-            "response_time": response_time,
-            "success": True,
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        model.update_usage(success=False)
-        raise HTTPException(status_code=500, detail=f"Model test failed: {str(e)}")
+# (Removed duplicate test endpoint that simulated responses; using enhanced test below)
 
 @router.get("/{model_id}/stats")
 async def get_model_stats(model_id: str):
     """Get statistics for a specific model."""
-    if model_id not in models_db:
+    if model_id not in model_manager.models:
         raise HTTPException(status_code=404, detail="Model not found")
-    
-    model = models_db[model_id]
-    
+    model = model_manager.models[model_id]
     return {
         "model_id": model_id,
         "usage_count": model.usage_count,
@@ -153,19 +100,17 @@ async def get_model_stats(model_id: str):
 @router.post("/{model_id}/enable")
 async def enable_model(model_id: str):
     """Enable a model."""
-    if model_id not in models_db:
+    if model_id not in model_manager.models:
         raise HTTPException(status_code=404, detail="Model not found")
-    
-    models_db[model_id].enabled = True
+    model_manager.models[model_id].enabled = True
     return {"message": "Model enabled successfully"}
 
 @router.post("/{model_id}/disable")
 async def disable_model(model_id: str):
     """Disable a model."""
-    if model_id not in models_db:
+    if model_id not in model_manager.models:
         raise HTTPException(status_code=404, detail="Model not found")
-    
-    models_db[model_id].enabled = False
+    model_manager.models[model_id].enabled = False
     return {"message": "Model disabled successfully"}
 
 @router.get("/enabled/list")

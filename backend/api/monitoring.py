@@ -20,6 +20,9 @@ router = APIRouter()
 # Initialize monitoring service
 monitoring_service = MonitoringService()
 
+# In-memory log storage for API logs (lightweight)
+logs_data: List[Dict[str, Any]] = []
+
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
@@ -48,59 +51,15 @@ manager = ConnectionManager()
 @router.get("/performance")
 async def get_performance_metrics(
     hours: int = Query(24, description="Hours of data to retrieve"),
-    service: Optional[str] = Query(None, description="Filter by service")
+    service: Optional[str] = Query(None, description="Filter by service (optional)")
 ):
-    """Get performance metrics."""
-    cutoff_time = datetime.now() - timedelta(hours=hours)
-    
-    # Filter data by time and service
-    filtered_data = [
-        entry for entry in performance_data
-        if entry["timestamp"] >= cutoff_time and (service is None or entry.get("service") == service)
-    ]
-    
-    if not filtered_data:
-        return {
-            "message": "No performance data available",
-            "period_hours": hours,
-            "service_filter": service
-        }
-    
-    # Calculate metrics
-    total_requests = len(filtered_data)
-    successful_requests = len([entry for entry in filtered_data if entry.get("success", False)])
-    success_rate = successful_requests / total_requests if total_requests > 0 else 0
-    
-    response_times = [entry.get("response_time", 0) for entry in filtered_data if entry.get("response_time")]
-    avg_response_time = sum(response_times) / len(response_times) if response_times else 0
-    
-    # Group by service
-    service_stats = {}
-    for entry in filtered_data:
-        svc = entry.get("service", "unknown")
-        if svc not in service_stats:
-            service_stats[svc] = {"requests": 0, "successful": 0, "response_times": []}
-        
-        service_stats[svc]["requests"] += 1
-        if entry.get("success", False):
-            service_stats[svc]["successful"] += 1
-        if entry.get("response_time"):
-            service_stats[svc]["response_times"].append(entry["response_time"])
-    
-    # Calculate service-specific metrics
-    for svc, stats in service_stats.items():
-        stats["success_rate"] = stats["successful"] / stats["requests"] if stats["requests"] > 0 else 0
-        stats["avg_response_time"] = sum(stats["response_times"]) / len(stats["response_times"]) if stats["response_times"] else 0
-        del stats["response_times"]  # Remove raw data
-    
-    return {
-        "period_hours": hours,
-        "total_requests": total_requests,
-        "success_rate": success_rate,
-        "avg_response_time": avg_response_time,
-        "services": service_stats,
-        "timestamp": datetime.now().isoformat()
-    }
+    """Get aggregated performance metrics from the monitoring service."""
+    aggregated = monitoring_service.get_aggregated_metrics(hours=hours)
+    if service:
+        # Filter down to a single service view while preserving schema
+        svc_stats = aggregated.get("services", {}).get(service)
+        aggregated["services"] = {service: svc_stats} if svc_stats else {}
+    return aggregated
 
 @router.get("/logs")
 async def get_logs(
@@ -151,81 +110,40 @@ async def add_log(log_data: Dict[str, Any]):
     return {"message": "Log entry added", "log_id": len(logs_data)}
 
 @router.get("/metrics")
-async def get_metrics():
-    """Get detailed metrics for dashboard."""
-    # This would typically query a metrics database
-    return {
-        "ab_mcts": {
-            "total_queries": 150,
-            "avg_score": 0.85,
-            "avg_response_time": 3.2,
-            "success_rate": 0.95,
-            "models_used": {
-                "deepseek-r1:1.5b": 60,
-                "gemma3:1b": 45,
-                "llama3.2:1b": 45
-            }
-        },
-        "multi_model": {
-            "total_queries": 200,
-            "avg_confidence": 0.82,
-            "avg_response_time": 1.8,
-            "success_rate": 0.98,
-            "models_used": {
-                "deepseek-r1:1.5b": 70,
-                "gemma3:1b": 65,
-                "llama3.2:1b": 65
-            }
-        },
-        "system": {
-            "uptime": "2 days, 5 hours",
-            "memory_usage": "4.2GB / 16GB",
-            "cpu_usage": "15%",
-            "disk_usage": "2.1GB / 100GB"
-        }
-    }
+async def get_metrics(hours: int = Query(1, description="Hours for aggregation")):
+    """Get detailed metrics for dashboard from monitoring service."""
+    return monitoring_service.get_aggregated_metrics(hours=hours)
 
 @router.get("/health")
 async def get_health_status():
     """Get detailed health status of all services."""
+    services = {
+        "ab_mcts": "http://ab-mcts-service:8094/health",
+        "multi_model": "http://multi-model-service:8090/health",
+        "backend_api": "http://backend-api:8095/health",
+    }
     health_status = {
         "timestamp": datetime.now().isoformat(),
         "overall_status": "healthy",
         "services": {}
     }
-    
-    # Check AB-MCTS service
-    try:
-        response = requests.get("http://localhost:8094/health", timeout=5)
-        health_status["services"]["ab_mcts"] = {
-            "status": "healthy" if response.status_code == 200 else "unhealthy",
-            "response_time": response.elapsed.total_seconds(),
-            "last_check": datetime.now().isoformat()
-        }
-    except Exception as e:
-        health_status["services"]["ab_mcts"] = {
-            "status": "unhealthy",
-            "error": str(e),
-            "last_check": datetime.now().isoformat()
-        }
-        health_status["overall_status"] = "degraded"
-    
-    # Check Multi-Model service
-    try:
-        response = requests.get("http://localhost:8090/health", timeout=5)
-        health_status["services"]["multi_model"] = {
-            "status": "healthy" if response.status_code == 200 else "unhealthy",
-            "response_time": response.elapsed.total_seconds(),
-            "last_check": datetime.now().isoformat()
-        }
-    except Exception as e:
-        health_status["services"]["multi_model"] = {
-            "status": "unhealthy",
-            "error": str(e),
-            "last_check": datetime.now().isoformat()
-        }
-        health_status["overall_status"] = "degraded"
-    
+    for name, url in services.items():
+        try:
+            response = requests.get(url, timeout=5)
+            health_status["services"][name] = {
+                "status": "healthy" if response.status_code == 200 else "unhealthy",
+                "response_time": response.elapsed.total_seconds(),
+                "last_check": datetime.now().isoformat()
+            }
+            if response.status_code != 200:
+                health_status["overall_status"] = "degraded"
+        except Exception as e:
+            health_status["services"][name] = {
+                "status": "unhealthy",
+                "error": str(e),
+                "last_check": datetime.now().isoformat()
+            }
+            health_status["overall_status"] = "degraded"
     return health_status
 
 # WebSocket endpoint for real-time monitoring

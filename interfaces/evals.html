@@ -18,11 +18,14 @@
         th, td { text-align:left; padding:8px; border-bottom:1px solid #eee; }
         .badge { display:inline-block; padding:2px 8px; border-radius:10px; background:#eef2ff; color:#3730a3; font-size:12px; }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
     <script>
         const API_BASE = 'http://localhost:8095';
 
         document.addEventListener('DOMContentLoaded', () => {
             loadRuns();
+            loadMetrics();
         });
 
         async function loadRuns() {
@@ -38,6 +41,9 @@
             `).join('');
             document.getElementById('runs-body').innerHTML = rows;
         }
+
+        let charts = { modelUsage: null, qualityOverTime: null, widthDepth: null };
+        let selectedRuns = new Set();
 
         async function viewRun(runId) {
             const [metaRes, eventsRes] = await Promise.all([
@@ -59,6 +65,9 @@
                 }
             } catch (e) {}
             document.getElementById('mcts-text').textContent = renderTextTree(iterationLog);
+
+            try { renderCharts(meta, iterationLog); } catch (e) { console.error('chart error', e); }
+            try { renderD3Tree(iterationLog); } catch (e) { console.error('d3 error', e); }
         }
 
         function renderTextTree(iterationLog) {
@@ -75,6 +84,163 @@
             }
             return lines.join('\n');
         }
+
+        async function loadMetrics() {
+            try {
+                const res = await fetch(`${API_BASE}/api/monitoring/performance?hours=1`);
+                const data = await res.json();
+                const services = data.services || {};
+                const rows = Object.entries(services).map(([name, stats]) => {
+                    const calls = stats.total_calls ?? stats.requests ?? 0;
+                    const sr = (stats.success_rate ?? 0) * 100;
+                    const art = stats.avg_response_time ?? 0;
+                    const p95 = stats.p95_response_time ?? 0;
+                    return `
+                        <tr>
+                            <td>${name}</td>
+                            <td>${calls}</td>
+                            <td>${sr.toFixed(1)}%</td>
+                            <td>${art.toFixed(2)}s</td>
+                            <td>${p95.toFixed(2)}s</td>
+                        </tr>
+                    `;
+                }).join('');
+                document.getElementById('metrics-body').innerHTML = rows || '<tr><td colspan="5">No recent metrics</td></tr>';
+                document.getElementById('metrics-period').textContent = data.period_hours ? `last ${data.period_hours}h` : 'last hour';
+            } catch (e) {
+                document.getElementById('metrics-body').innerHTML = '<tr><td colspan="5">Failed to load metrics</td></tr>';
+            }
+        }
+
+        function renderCharts(meta, iterationLog) {
+            const stats = (meta && meta.result && meta.result.search_stats) ? meta.result.search_stats : {};
+            // Model Usage (bar)
+            const mu = stats.model_usage || {};
+            const muLabels = Object.keys(mu);
+            const muValues = muLabels.map(k => mu[k]);
+            const ctxMU = document.getElementById('chart-model-usage').getContext('2d');
+            if (charts.modelUsage) charts.modelUsage.destroy();
+            charts.modelUsage = new Chart(ctxMU, {
+                type: 'bar',
+                data: { labels: muLabels, datasets: [{ label: 'Model usage', data: muValues, backgroundColor: '#60a5fa' }]},
+                options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            });
+
+            // Best Quality per iteration (line)
+            const qSeries = (Array.isArray(iterationLog) ? iterationLog : []).map(it => {
+                const qualities = (it.nodes || []).map(n => Number(n.quality) || 0);
+                const best = qualities.length ? Math.max(...qualities) : 0;
+                return { x: it.iteration || 0, y: best };
+            });
+            const ctxQ = document.getElementById('chart-quality-over-time').getContext('2d');
+            if (charts.qualityOverTime) charts.qualityOverTime.destroy();
+            charts.qualityOverTime = new Chart(ctxQ, {
+                type: 'line',
+                data: { datasets: [{ label: 'Best quality per iteration', data: qSeries, borderColor: '#10b981', pointRadius: 2, fill: false }]},
+                options: { parsing: false, scales: { x: { type: 'linear', title: { display: true, text: 'Iteration' } }, y: { min: 0, max: 1, title: { display: true, text: 'Quality (0-1)' } } } }
+            });
+
+            // Width vs Depth counts (stacked bar)
+            const widthCount = Number(stats.width_searches || 0);
+            const depthCount = Number(stats.depth_searches || 0);
+            const ctxWD = document.getElementById('chart-width-depth').getContext('2d');
+            if (charts.widthDepth) charts.widthDepth.destroy();
+            charts.widthDepth = new Chart(ctxWD, {
+                type: 'bar',
+                data: { labels: ['Searches'], datasets: [
+                    { label: 'Width', data: [widthCount], backgroundColor: '#22c55e' },
+                    { label: 'Depth', data: [depthCount], backgroundColor: '#ef4444' }
+                ]},
+                options: { responsive: true, plugins: { legend: { position: 'top' } }, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } }
+            });
+        }
+
+        function renderD3Tree(iterationLog) {
+            const container = document.getElementById('mcts-svg');
+            container.innerHTML = '';
+            const width = container.clientWidth || 1000;
+            const height = 320;
+            const svg = d3.select(container).append('svg').attr('width', width).attr('height', height);
+            if (!Array.isArray(iterationLog) || iterationLog.length === 0) {
+                svg.append('text').attr('x', 12).attr('y', 20).text('No iteration log available');
+                return;
+            }
+            // Flatten nodes by iteration; each item has nodes: [{model, quality, search_type, preview}]
+            const nodes = [];
+            const links = [];
+            const colorByType = d3.scaleOrdinal().domain(['width','depth']).range(['#22c55e','#ef4444']);
+            const modelColor = d3.scaleOrdinal(d3.schemeTableau10);
+            let idCounter = 0;
+            const levelX = d3.scaleLinear().domain([0, iterationLog.length+1]).range([80, width-40]);
+            // Create a pseudo-root
+            nodes.push({ id: 'root', label: 'Root', iteration: 0, x: levelX(0), y: height/2, fx: levelX(0), fy: height/2 });
+            let prevIds = ['root'];
+            iterationLog.forEach((it, idx) => {
+                const yStep = Math.max(1, (height-80) / Math.max(1,(it.nodes||[]).length));
+                (it.nodes||[]).forEach((n, j) => {
+                    const id = `n${++idCounter}`;
+                    const y = 40 + j*yStep;
+                    nodes.push({ id, label: `${n.model||'?'}\nq=${Number(n.quality||0).toFixed(2)}`, model: n.model||'unknown', type: n.search_type||'width', iteration: it.iteration||idx+1, x: levelX(idx+1), y });
+                    // connect from root or previous layer heuristically
+                    links.push({ source: prevIds[Math.min(j, prevIds.length-1)], target: id });
+                });
+                prevIds = nodes.filter(nd => nd.iteration === (it.iteration||idx+1)).map(nd => nd.id);
+            });
+            const sim = d3.forceSimulation(nodes)
+                .force('link', d3.forceLink(links).id(d => d.id).distance(40).strength(0.4))
+                .force('charge', d3.forceManyBody().strength(-30))
+                .force('x', d3.forceX().x(d => d.x).strength(0.6))
+                .force('y', d3.forceY().y(d => d.y).strength(0.6))
+                .stop();
+            for (let i=0; i<80; i++) sim.tick();
+            svg.append('g').selectAll('line').data(links).join('line')
+                .attr('x1', d => getNode(d.source).x).attr('y1', d => getNode(d.source).y)
+                .attr('x2', d => getNode(d.target).x).attr('y2', d => getNode(d.target).y)
+                .attr('stroke', '#94a3b8').attr('stroke-width', 1);
+            const g = svg.append('g').selectAll('g').data(nodes).join('g');
+            g.append('circle')
+                .attr('cx', d => d.x).attr('cy', d => d.y).attr('r', 10)
+                .attr('fill', d => d.id==='root' ? '#fff' : modelColor(d.model||'root'))
+                .attr('stroke', d => d.id==='root' ? '#0ea5e9' : colorByType(d.type||'width'))
+                .attr('stroke-width', 2);
+            g.append('title').text(d => d.label);
+            function getNode(n){ return typeof n === 'object' ? n : nodes.find(x=>x.id===n); }
+        }
+
+        async function compareRuns() {
+            const val = (document.getElementById('compare-input').value || '').trim();
+            if (!val) return;
+            const ids = val.split(',').map(s => s.trim()).filter(Boolean).slice(0, 5);
+            const metas = await Promise.all(ids.map(id => fetch(`${API_BASE}/api/runs/${id}`).then(r => r.json()).catch(()=>null)));
+            // Quality overlay
+            const datasetsQ = [];
+            metas.forEach((m, idx) => {
+                const iter = ((m && m.result && m.result.iteration_log) ? m.result.iteration_log : []);
+                const series = iter.map(it => {
+                    const qualities = (it.nodes || []).map(n => Number(n.quality)||0);
+                    const best = qualities.length ? Math.max(...qualities) : 0;
+                    return { x: it.iteration || (series.length+1), y: best };
+                });
+                datasetsQ.push({ label: ids[idx], data: series, borderWidth: 2, fill: false });
+            });
+            const ctxCQ = document.getElementById('cmp-quality').getContext('2d');
+            if (charts.cmpQ) charts.cmpQ.destroy();
+            charts.cmpQ = new Chart(ctxCQ, { type: 'line', data: { datasets: datasetsQ }, options: { parsing: false, scales: { x: { type: 'linear', title: { display: true, text: 'Iteration' } }, y: { min: 0, max: 1, title: { display: true, text: 'Quality' } } } } });
+
+            // Model usage stacked: union of models across runs
+            const modelSet = new Set();
+            const perRunMU = metas.map(m => (m && m.result && m.result.search_stats && m.result.search_stats.model_usage) ? m.result.search_stats.model_usage : {});
+            perRunMU.forEach(mu => Object.keys(mu).forEach(k => modelSet.add(k)));
+            const labels = Array.from(modelSet);
+            const datasetsMU = perRunMU.map((mu, i) => ({
+                label: ids[i],
+                data: labels.map(k => Number(mu[k]||0)),
+                backgroundColor: `hsl(${(i*72)%360},70%,60%)`
+            }));
+            const ctxCM = document.getElementById('cmp-models').getContext('2d');
+            if (charts.cmpM) charts.cmpM.destroy();
+            charts.cmpM = new Chart(ctxCM, { type: 'bar', data: { labels, datasets: datasetsMU }, options: { scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } } });
+        }
     </script>
 </head>
 <body>
@@ -82,6 +248,8 @@
         <div>Evals & Visualizations</div>
         <div>
             <a href="/dashboard.html">Dashboard</a>
+            <a href="http://localhost:3001" target="_blank" rel="noopener">Grafana</a>
+            <a href="http://localhost:9090" target="_blank" rel="noopener">Prometheus</a>
         </div>
     </div>
     <div class="container">
@@ -109,6 +277,36 @@
                 <tbody id="runs-body"></tbody>
             </table>
         </div>
+        <div class="card">
+            <h3>Compare Runs</h3>
+            <p>Select run IDs (comma-separated) and compare best-quality-by-iteration and model usage.</p>
+            <input id="compare-input" placeholder="run_id_1, run_id_2" onkeydown="if(event.key==='Enter'){compareRuns();}">
+            <button onclick="compareRuns()">Compare</button>
+            <div class="grid">
+                <div>
+                    <h4>Best Quality (overlay)</h4>
+                    <canvas id="cmp-quality" height="140"></canvas>
+                </div>
+                <div>
+                    <h4>Model Usage (stacked)</h4>
+                    <canvas id="cmp-models" height="140"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="grid">
+            <div class="card">
+                <h3>Model Usage</h3>
+                <canvas id="chart-model-usage" height="140"></canvas>
+            </div>
+            <div class="card">
+                <h3>Best Quality by Iteration</h3>
+                <canvas id="chart-quality-over-time" height="140"></canvas>
+            </div>
+        </div>
+        <div class="card">
+            <h3>Width vs Depth</h3>
+            <canvas id="chart-width-depth" height="120"></canvas>
+        </div>
         <div class="grid">
             <div class="card">
                 <h3>Run Metadata</h3>
@@ -122,6 +320,28 @@
         <div class="card">
             <h3>MCTS Text Visualization</h3>
             <pre id="mcts-text">Select a run...</pre>
+        </div>
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3>Live Metrics <span id="metrics-period" class="badge">last hour</span></h3>
+                <div>
+                    <button onclick="loadMetrics()">Refresh</button>
+                </div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Service</th>
+                        <th>Requests</th>
+                        <th>Success Rate</th>
+                        <th>Avg Latency</th>
+                        <th>P95 Latency</th>
+                    </tr>
+                </thead>
+                <tbody id="metrics-body">
+                    <tr><td colspan="5">Loading...</td></tr>
+                </tbody>
+            </table>
         </div>
     </div>
 </body>

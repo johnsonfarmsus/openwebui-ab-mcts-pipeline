@@ -1,0 +1,54 @@
+{
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "type": "graph",
+      "title": "AB-MCTS Latency (p95)",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(ab_mcts_latency_seconds_bucket[5m])) by (le))" }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 }
+    },
+    {
+      "type": "graph",
+      "title": "Multi-Model Latency (p95)",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(multi_model_latency_seconds_bucket[5m])) by (le))" }
+      ],
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 }
+    },
+    {
+      "type": "graph",
+      "title": "Backend HTTP Latency (p95)",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(backend_http_request_latency_seconds_bucket[5m])) by (le,path))" }
+      ],
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 }
+    },
+    {
+      "type": "bargauge",
+      "title": "Model Usage (rate)",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(rate(multi_model_model_usage_total[5m])) by (model)" }
+      ],
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 }
+    },
+    {
+      "type": "stat",
+      "title": "AB-MCTS Success Rate (5m)",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "rate(ab_mcts_success_total[5m]) / rate(ab_mcts_queries_total[5m])" }
+      ],
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "title": "AB-MCTS Research"
+}
+

@@ -14,11 +14,13 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from backend.services.monitoring_service import MonitoringService
+from backend.services.experiment_logger import ExperimentLogger
 
 router = APIRouter()
 
 # Initialize monitoring service
 monitoring_service = MonitoringService()
+logger = ExperimentLogger()
 
 # In-memory log storage for API logs (lightweight)
 logs_data: List[Dict[str, Any]] = []
@@ -188,6 +190,30 @@ async def get_live_metrics():
         return health_dashboard
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get live metrics: {str(e)}")
+
+@router.get("/passk")
+async def get_pass_at_k(k: int = Query(50, ge=1, le=1000), hours: int = Query(24, ge=1, le=168)):
+    """Compute a simple Pass@k from recent runs (success if result present and non-empty within first k iterations)."""
+    try:
+        # naive: list recent runs from SQLite index; fall back to /api if needed
+        runs = logger.list_runs(limit=500)
+        cutoff = datetime.now().timestamp() - (hours * 3600)
+        recent = [r for r in runs if (r.get('started_at') or 0) >= cutoff]
+        total = len(recent)
+        if total == 0:
+            return {"k": k, "period_hours": hours, "total_runs": 0, "pass_at_k": 0.0}
+        passed = 0
+        for r in recent:
+            meta = logger.get_run(r['run_id'])
+            result = (meta or {}).get('result', {})
+            # Consider success if result has non-empty 'result' string, and if iteration_log length <= k or unknown
+            text = result.get('result') or ''
+            itlog = result.get('iteration_log') or []
+            if isinstance(text, str) and text.strip() and (not isinstance(itlog, list) or len(itlog) <= k or len(itlog) == 0):
+                passed += 1
+        return {"k": k, "period_hours": hours, "total_runs": total, "passed": passed, "pass_at_k": passed/total}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to compute Pass@k: {str(e)}")
 
 @router.get("/metrics/{metric_name}")
 async def get_metric_data(metric_name: str, hours: int = 1):

@@ -101,6 +101,8 @@ services:
     networks:
       - openwebui-net
     restart: always
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
 
   # HTTP Server for interfaces
   # MCP Server for Open WebUI Integration

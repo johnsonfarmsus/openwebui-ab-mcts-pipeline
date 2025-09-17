@@ -276,6 +276,40 @@ async def maybe_enrich_with_tools(user_message: str) -> (str, List[Dict[str, Any
     except Exception as e:
         events.append({"type": "tool", "tool": "element_augment", "ok": False, "error": str(e)})
 
+    # If no SMILES detected, attempt name->structure via PubChem and then RDKit metrics
+    try:
+        if not any(ev.get("tool") == "chem_lipinski_pains" and ev.get("ok") for ev in events):
+            # Use first significant token as candidate name when no formula/SMILES. Keep it simple for now.
+            candidate = user_message.strip().split("\n")[0].strip()
+            if candidate and len(candidate.split()) <= 6:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    r = await client.post(f"{OPENWEBUI_INTEGRATION_URL}/tools/pubchem/lookup", json={"name": candidate})
+                    if r.status_code == 200 and r.json().get("success"):
+                        pd = r.json()
+                        desc = (pd.get("description") or "")[:300]
+                        if desc:
+                            prefix_parts.append(f"PubChem: {desc}")
+                            events.append({"type": "tool", "tool": "pubchem_lookup", "args": {"name": candidate}, "ok": True})
+                        smiles = pd.get("smiles")
+                        if smiles:
+                            rr = await client.post(f"{OPENWEBUI_INTEGRATION_URL}/tools/chem/lipinski_pains", json={"smiles": smiles})
+                            if rr.status_code == 200 and rr.json().get("success"):
+                                lip = rr.json().get("lipinski", {})
+                                parts = []
+                                if isinstance(lip.get('mw'), (int, float)):
+                                    parts.append(f"mw={lip['mw']:.1f}")
+                                for k in ('hbd','hba','logp','rotatable_bonds','tpsa','ring_count','fraction_csp3','heavy_atoms','passes'):
+                                    if lip.get(k) is not None:
+                                        parts.append(f"{k}={lip.get(k)}")
+                                prefix_parts.append(f"RDKit (from name→SMILES): {' '.join(parts)}")
+                                events.append({"type": "tool", "tool": "chem_lipinski_pains", "args": {"smiles": smiles}, "ok": True})
+                            else:
+                                events.append({"type": "tool", "tool": "chem_lipinski_pains", "args": {"smiles": smiles}, "ok": False})
+                    else:
+                        events.append({"type": "tool", "tool": "pubchem_lookup", "args": {"name": candidate}, "ok": False})
+    except Exception as e:
+        events.append({"type": "tool", "tool": "name_to_structure", "ok": False, "error": str(e)})
+
     # RDKit Lipinski/PAINS (always attempt if any SMILES-like token exists)
     try:
         smiles = _extract_smiles_candidates(user_message)

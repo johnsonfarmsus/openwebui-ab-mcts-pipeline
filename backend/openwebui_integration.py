@@ -315,7 +315,7 @@ async def pubchem_lookup(payload: Dict[str, Any]):
             cid = cids[0]
             # Get description (PUG View) and a few properties
             desc_r = await client.get(f"{base}/view/data/compound/{cid}/JSON")
-            props_r = await client.get(f"{base}/compound/cid/{cid}/property/MolecularFormula,MolecularWeight,IsotopeAtomCount,InChIKey/JSON")
+            props_r = await client.get(f"{base}/compound/cid/{cid}/property/MolecularFormula,MolecularWeight,IsotopeAtomCount,InChIKey,CanonicalSMILES/JSON")
             desc = ""
             try:
                 view = desc_r.json()
@@ -340,15 +340,17 @@ async def pubchem_lookup(payload: Dict[str, Any]):
             except Exception:
                 desc = ""
             props = {}
+            smiles = None
             try:
                 props_data = props_r.json().get("PropertyTable", {}).get("Properties", [{}])[0]
-                props = {k: props_data.get(k) for k in ("MolecularFormula", "MolecularWeight", "InChIKey", "IsotopeAtomCount")}
+                props = {k: props_data.get(k) for k in ("MolecularFormula", "MolecularWeight", "InChIKey", "IsotopeAtomCount", "CanonicalSMILES")}
+                smiles = props.get("CanonicalSMILES")
             except Exception:
                 props = {}
             # Trim description for prompt safety
             if desc and len(desc) > 600:
                 desc = desc[:600] + "…"
-            return {"success": True, "cid": cid, "description": desc, "properties": props}
+            return {"success": True, "cid": cid, "description": desc, "properties": props, "smiles": smiles}
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"PubChem HTTP error: {str(e)}")
 

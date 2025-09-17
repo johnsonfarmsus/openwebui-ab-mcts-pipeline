@@ -156,24 +156,39 @@ def _extract_material_query(message: str) -> Optional[Dict[str, str]]:
 
 # --- Element detection and local knowledge ---
 _ELEMENTS_PATH = "/app/backend/resources/elements_uses.json"
+_PT_PATH = "/app/backend/resources/periodic_table.json"
 try:
     with open(_ELEMENTS_PATH, "r", encoding="utf-8") as f:
         _ELEMENTS_MAP: Dict[str, Dict[str, Any]] = _json.load(f)
 except Exception:
     _ELEMENTS_MAP = {}
 
+try:
+    with open(_PT_PATH, "r", encoding="utf-8") as f:
+        _PT_LIST: List[Dict[str, Any]] = _json.load(f)
+except Exception:
+    _PT_LIST = []
+
+_PT_NAME_TO_SYMBOL: Dict[str, str] = { (e.get("name") or "").lower(): e.get("symbol") for e in _PT_LIST if e.get("symbol") }
+_PT_SYMBOLS: set = set([e.get("symbol") for e in _PT_LIST if e.get("symbol")])
+
 _NAME_TO_SYMBOL: Dict[str, str] = {v.get("name", "").lower(): k for k, v in _ELEMENTS_MAP.items()}
 
 def _detect_element(message: str) -> Optional[Dict[str, Any]]:
     msg = (message or "").lower()
-    # Try exact word match on element names first
+    # Try exact word match on element names first (curated uses list)
     for name, sym in _NAME_TO_SYMBOL.items():
         # match whole words to avoid substring collisions
         if re.search(r"\b" + re.escape(name) + r"\b", msg):
             rec = _ELEMENTS_MAP.get(sym) or {}
             return {"symbol": sym, "record": rec}
+    # Fallback: periodic table names
+    for name, sym in _PT_NAME_TO_SYMBOL.items():
+        if re.search(r"\b" + re.escape(name) + r"\b", msg):
+            rec = _ELEMENTS_MAP.get(sym) or {"name": name, "symbol": sym}
+            return {"symbol": sym, "record": rec}
     # Also allow lone symbol (case-sensitive common symbols like Pm)
-    for sym in _ELEMENTS_MAP.keys():
+    for sym in (_PT_SYMBOLS or set(_ELEMENTS_MAP.keys())):
         if re.search(r"\b" + re.escape(sym) + r"\b", message):
             rec = _ELEMENTS_MAP.get(sym) or {}
             return {"symbol": sym, "record": rec}

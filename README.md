@@ -209,7 +209,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🙏 Acknowledgments
 
-- [Sakana AI](https://sakana.ai/) for the AB-MCTS research and TreeQuest library
-- [Sakana AI AB-MCTS-ARC2](https://github.com/SakanaAI/ab-mcts-arc2) for the official implementation reference
+- [Sakana AI](https://sakana.ai/) for the AB‑MCTS research and TreeQuest library
+- [Sakana AI AB‑MCTS‑ARC2](https://github.com/SakanaAI/ab-mcts-arc2) for the official implementation reference
 - [Open WebUI](https://github.com/open-webui/open-webui) for the chat interface
 - [Ollama](https://ollama.ai/) for local model serving
+- [Prometheus](https://prometheus.io/) and [Grafana](https://grafana.com/) for observability tooling
+- [RDKit](https://www.rdkit.org/) (optional) for chemistry descriptors; `rdkit-pypi` wheels used when installed
+- [Materials Project](https://materialsproject.org/) (optional) for materials data via their API

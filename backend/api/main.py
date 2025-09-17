@@ -11,6 +11,7 @@ from typing import Dict, Any
 
 import sys
 import os
+import time
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from backend.api.pipelines import router as pipelines_router
@@ -21,6 +22,7 @@ from backend.api.config import router as config_router
 # New: runs endpoints
 from fastapi import APIRouter
 from backend.services.experiment_logger import ExperimentLogger
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 # Create FastAPI app
 app = FastAPI(
@@ -30,6 +32,36 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc"
 )
+# --- Prometheus metrics ---
+HTTP_REQUESTS = Counter(
+    "backend_http_requests_total",
+    "Total HTTP requests",
+    ["method", "path", "status"],
+)
+HTTP_LATENCY = Histogram(
+    "backend_http_request_latency_seconds",
+    "HTTP request latency in seconds",
+    ["method", "path"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600),
+)
+
+@app.middleware("http")
+async def prometheus_middleware(request: Request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    elapsed = time.time() - start
+    path = request.url.path
+    method = request.method
+    try:
+        HTTP_LATENCY.labels(method=method, path=path).observe(elapsed)
+        HTTP_REQUESTS.labels(method=method, path=path, status=str(response.status_code)).inc()
+    except Exception:
+        pass
+    return response
+
+@app.get("/metrics")
+async def metrics():
+    return FastAPI.responses.Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 # Add CORS middleware
 app.add_middleware(

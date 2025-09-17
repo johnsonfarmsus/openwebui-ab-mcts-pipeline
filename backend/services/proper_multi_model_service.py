@@ -27,8 +27,22 @@ from models import QueryRequest, QueryResponse, SearchStats
 # Import model discovery
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from model_discovery import ModelDiscoveryService
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 app = FastAPI(title="Proper Multi-Model Service", version="2.0.0")
+# Prometheus metrics
+MM_QUERIES = Counter("multi_model_queries_total", "Total Multi-Model queries")
+MM_SUCCESS = Counter("multi_model_success_total", "Successful Multi-Model responses")
+MM_LATENCY = Histogram(
+    "multi_model_latency_seconds",
+    "Multi-Model end-to-end latency (seconds)",
+    buckets=(0.5, 1, 2, 5, 10, 20, 30, 60, 120),
+)
+MM_MODELS_USED = Counter(
+    "multi_model_model_usage_total",
+    "Model usage in Multi-Model calls",
+    ["model"],
+)
 
 # Add CORS middleware
 app.add_middleware(
@@ -363,6 +377,7 @@ Synthesized Answer:"""
     
     def process_query(self, query: str, models: Optional[List[str]] = None) -> QueryResponse:
         """Process a query using sophisticated multi-model collaboration."""
+        MM_QUERIES.inc()
         start_time = time.time()
         
         # Use provided models or selected models
@@ -377,6 +392,7 @@ Synthesized Answer:"""
             
             response = self.call_ollama(model, prompt, temperature)
             responses.append(response)
+            MM_MODELS_USED.labels(model=model).inc()
         
         # Synthesize responses
         synthesized_response = self.synthesize_responses(responses, query)
@@ -405,13 +421,17 @@ Synthesized Answer:"""
                              for resp in successful_responses}
         }
         
-        return QueryResponse(
+        result = QueryResponse(
             result=synthesized_response,
             success=len(successful_responses) > 0,
             search_stats=search_stats,
             conversation_id=str(uuid.uuid4()),
             turn_id=str(uuid.uuid4())
         )
+        MM_LATENCY.observe(total_time)
+        if result.success:
+            MM_SUCCESS.inc()
+        return result
 
 # Initialize service
 service = ProperMultiModelService()
@@ -420,6 +440,10 @@ service = ProperMultiModelService()
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+@app.get("/metrics")
+async def metrics():
+    return FastAPI.responses.Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.post("/query")
 async def process_query_endpoint(request: QueryRequest):

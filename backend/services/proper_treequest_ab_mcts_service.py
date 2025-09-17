@@ -32,8 +32,33 @@ from models import LLMState, QueryRequest, QueryResponse, SearchStats, Conversat
 # Import model discovery
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from model_discovery import ModelDiscoveryService
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 app = FastAPI(title="Proper TreeQuest AB-MCTS Service", version="6.0.0")
+# Prometheus metrics
+AB_MCTS_QUERIES = Counter(
+    "ab_mcts_queries_total",
+    "Total AB-MCTS queries",
+)
+AB_MCTS_SUCCESS = Counter(
+    "ab_mcts_success_total",
+    "Successful AB-MCTS responses",
+)
+AB_MCTS_LATENCY = Histogram(
+    "ab_mcts_latency_seconds",
+    "AB-MCTS end-to-end latency (seconds)",
+    buckets=(1, 2, 5, 10, 20, 30, 60, 120, 300, 600),
+)
+AB_MCTS_ITERATIONS = Histogram(
+    "ab_mcts_iterations",
+    "Iterations used per query",
+    buckets=(1, 3, 5, 10, 15, 20),
+)
+AB_MCTS_NODES = Histogram(
+    "ab_mcts_nodes_created",
+    "Nodes created per query",
+    buckets=(1, 5, 10, 20, 50, 100, 200, 500, 1000),
+)
 
 # Add CORS middleware
 app.add_middleware(
@@ -360,13 +385,16 @@ Enhanced Response:"""
                      conversation_id: Optional[str] = None, models: Optional[List[str]] = None) -> QueryResponse:
         """Process a query using proper TreeQuest AB-MCTS."""
         try:
+            AB_MCTS_QUERIES.inc()
             # Update models if provided
             if models:
                 self.update_models(models)
             
             # Run proper TreeQuest AB-MCTS search
             include_tree = True  # always capture for research; UI can ignore
+            t0 = time.time()
             result = self.run_proper_treequest_ab_mcts(query, iterations, max_depth, include_tree)
+            AB_MCTS_LATENCY.observe(time.time() - t0)
             
             # Create response
             response = QueryResponse(
@@ -378,6 +406,11 @@ Enhanced Response:"""
                 iteration_log=result.get("iteration_log", [])
             )
             
+            # Metrics from search stats
+            stats = result["search_stats"]
+            AB_MCTS_ITERATIONS.observe(stats.get("total_iterations", 0) or 0)
+            AB_MCTS_NODES.observe(stats.get("nodes_created", 0) or 0)
+            AB_MCTS_SUCCESS.inc()
             return response
             
         except Exception as e:
@@ -397,6 +430,10 @@ service = ProperTreeQuestABMCTSService()
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+@app.get("/metrics")
+async def metrics():
+    return FastAPI.responses.Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.post("/query")
 async def process_query_endpoint(request: QueryRequest):

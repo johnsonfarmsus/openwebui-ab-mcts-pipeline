@@ -106,6 +106,9 @@ openwebui-setup/
 │   │   ├── search_stats.py    # Search statistics
 │   │   └── model_config.py    # Model configuration
 │   └── dashboard/             # Web dashboard (static)
+├── grafana/                    # Grafana provisioning (datasource & dashboard)
+│   └── provisioning/
+├── prometheus.yml              # Prometheus scrape config
 ├── services/                  # Standalone services
 │   ├── ab_mcts_service.py    # AB-MCTS service
 │   ├── multi_model_service.py # Multi-model service
@@ -367,6 +370,7 @@ curl http://localhost:8094/health
 
 # Monitor performance
 curl http://localhost:8095/api/monitoring/performance
+curl 'http://localhost:8095/api/monitoring/passk?k=50&hours=24'
 
 # View logs
 tail -f logs/ab_mcts.log
@@ -377,6 +381,8 @@ tail -f logs/ab_mcts.log
 ```bash
 # Access static dashboard (served by docker-compose http-server)
 open http://localhost:8081/dashboard.html
+open http://localhost:3001  # Grafana
+open http://localhost:9090  # Prometheus
 ```
 
 ## 🔧 Configuration Management

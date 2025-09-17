@@ -170,6 +170,23 @@ Get performance metrics.
 ```
 
 ##### GET /api/monitoring/logs
+##### GET /api/monitoring/passk
+Compute a simple Pass@k over recent runs.
+
+**Query Parameters:**
+- `k` (int): budget threshold, default 50 (1–1000)
+- `hours` (int): lookback window, default 24 (1–168)
+
+**Response:**
+```json
+{
+  "k": 50,
+  "period_hours": 24,
+  "total_runs": 42,
+  "passed": 12,
+  "pass_at_k": 0.2857
+}
+```
 Get system logs.
 
 **Query Parameters:**
@@ -358,6 +375,11 @@ curl -X POST http://localhost:8095/api/models \
 
 ```bash
 curl http://localhost:8095/api/monitoring/performance
+
+### Get Pass@k
+```bash
+curl 'http://localhost:8095/api/monitoring/passk?k=50&hours=24'
+```
 ```
 
 ## 🔄 WebSocket Events

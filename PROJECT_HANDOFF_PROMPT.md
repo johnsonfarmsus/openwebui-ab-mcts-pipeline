@@ -86,10 +86,13 @@ Open WebUI (Tools)            → MCP (8096) / Tools (8097) → AB‑MCTS / Mult
 - Multi-Model Service: `http://localhost:8090`
 - Backend API: `http://localhost:8095`
 - Management Dashboard: `http://localhost:8081/dashboard.html`
+ - Prometheus: `http://localhost:9090`
+ - Grafana: `http://localhost:3001`
 
 ### **Open WebUI Configuration**
 - Settings → Connections → Direct Connections → add `http://localhost:8098`
 - Or Tools via MCP (8096) / HTTP tools (8097)
+ - Observability: Prometheus scrapes `/metrics` on backend‑api (8095), ab‑mcts (8094), multi‑model (8090). Grafana datasource is provisioned by default.
 
 ## 🎯 **Immediate Next Steps**
 

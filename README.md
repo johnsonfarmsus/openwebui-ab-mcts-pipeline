@@ -126,6 +126,8 @@ docker-compose up -d
 | MCP Server | 8096 | Tools bridge for Open WebUI |
 | Open WebUI Integration | 8097 | Tool endpoints (OpenAPI) |
 | Model Integration | 8098 | OpenAI-compatible model adapter |
+| Prometheus | 9090 | Metrics scraping (/metrics on services) |
+| Grafana | 3001 | Dashboards (pre-provisioned Prometheus) |
 | HTTP Server | 8081 | Static dashboard (`/dashboard.html`) |
 
 ## 📊 Current Status
@@ -165,6 +167,7 @@ docker-compose up -d
   - `GET http://localhost:8095/api/runs?limit=50`
   - `GET http://localhost:8095/api/runs/{run_id}`
   - `GET http://localhost:8095/api/runs/{run_id}/events?head=200`
+  - `GET http://localhost:8095/api/monitoring/passk?k=50&hours=24` (simple Pass@k rollup)
 
 ## 🔬 Science Tools (optional)
 
@@ -190,6 +193,7 @@ Use these tools via:
 - Set `MATERIALS_PROJECT_API_KEY` to enable Materials Project lookups.
 - Logging directory can be controlled with `LOGS_DIR` (defaults to `/app/logs` in containers).
 - Open WebUI model integration: either add `http://localhost:8098` as a Direct Connection (OpenAI‑compatible) or set `OPENAI_API_BASE_URLS` to include `http://model-integration:8098` in Docker.
+- Prometheus scrapes: backend‑api (8095)/metrics, ab‑mcts-service (8094)/metrics, multi-model-service (8090)/metrics. Grafana is preconfigured with a starter dashboard.
 
 ## 🤝 Contributing
 

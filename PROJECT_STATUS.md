@@ -130,6 +130,8 @@
 - `model-integration` - Open WebUI model integration
 - `backend-api` - Management and monitoring API
 - `http-server` - Static file serving for dashboards
+ - `prometheus` - Metrics scraping
+ - `grafana` - Dashboards (Prometheus datasource provisioned)
 
 ### **Network Configuration**
 - Network: `openwebui-setup_openwebui-net`
@@ -213,6 +215,8 @@ openwebui-setup/
 - Dashboard: `http://localhost:8081/dashboard.html`
 - Tool Test: `http://localhost:8081/tool_test.html`
 - Backend API: `http://localhost:8095/api/docs`
+  - Metrics: `http://localhost:8095/metrics`
+  - Research endpoints: `/api/monitoring/performance`, `/api/monitoring/passk`
 
 ## 📊 **Performance Metrics**
 - AB‑MCTS: multi‑minute on complex queries

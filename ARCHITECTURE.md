@@ -202,6 +202,15 @@ services:
 - **Performance**: Response times, success rates (monitoring endpoints)
 - **Health**: Service statuses and periodic updates (WebSocket)
 
+### Observability Stack
+- **Metrics endpoints**: `/metrics` on backend API (8095), AB‑MCTS (8094), Multi‑Model (8090)
+- **Prometheus**: scrapes the services (see `prometheus.yml`)
+- **Grafana**: pre-provisioned datasource and starter dashboard (AB‑MCTS latency p95, success rate, model usage, backend HTTP p95)
+
+### Research Metrics
+- **Aggregated**: `/api/monitoring/performance` per service
+- **Pass@k**: `/api/monitoring/passk?k=K&hours=H` computed from recent runs
+
 ## 🔒 Security Considerations
 
 ### Anti-Hallucination

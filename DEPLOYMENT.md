@@ -95,6 +95,11 @@ curl http://localhost:8095/api/docs | head -n 1
 
 # Check Open WebUI Integration Tools
 curl http://localhost:8097/tools
+
+# Check metrics endpoints (Prometheus format)
+curl -s http://localhost:8095/metrics | head -n 5
+curl -s http://localhost:8094/metrics | head -n 5
+curl -s http://localhost:8090/metrics | head -n 5
 ```
 
 ## 🐳 Docker Configuration
@@ -195,6 +200,28 @@ services:
     command: ["python", "backend/api/main.py"]
     volumes:
       - logs:/app/logs
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - openwebui-net
+    restart: always
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    networks:
+      - openwebui-net
+    restart: always
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
 ```
 
 ### Dockerfile

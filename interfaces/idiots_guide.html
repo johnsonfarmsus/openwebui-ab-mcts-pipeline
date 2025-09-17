@@ -38,7 +38,16 @@
         </div>
 
         <div class="card">
-            <h2>2) Start everything</h2>
+            <h2>2) Install base models in Ollama</h2>
+            <p>If you don't already have models, pull a few small ones to test:</p>
+            <pre>ollama pull qwen3:0.6b
+ollama pull gemma3:1b
+ollama pull llama3.2:1b</pre>
+            <p style="color:#666;">Tip: These downloads can take a few minutes depending on your connection.</p>
+        </div>
+
+        <div class="card">
+            <h2>3) Start everything</h2>
             <p>Open a terminal and run:</p>
             <pre>git clone https://github.com/johnsonfarmsus/openwebui-ab-mcts-pipeline.git
 cd openwebui-ab-mcts-pipeline
@@ -68,9 +77,28 @@ docker compose up -d</pre>
         </div>
 
         <div class="card">
-            <h2>4) Try it</h2>
+            <h2>5) Configure AB‑MCTS and Multi‑Model (Dashboard)</h2>
             <ol>
-                <li>Open the <a href="/dashboard.html">Dashboard</a> → select AB‑MCTS models, set <strong>Iterations</strong> and <strong>Max Depth</strong>, then click <strong>Update AB-MCTS Models</strong> and <strong>Update Parameters</strong></li>
+                <li>Open the <a href="/dashboard.html">Dashboard</a></li>
+                <li>AB‑MCTS Configuration:
+                    <ul>
+                        <li>Select 2–3 models (e.g., qwen3:0.6b, gemma3:1b, llama3.2:1b)</li>
+                        <li>Set <strong>Iterations</strong> = <strong>10</strong>, <strong>Max Depth</strong> = <strong>3</strong> (good starting point)</li>
+                        <li>Click <strong>Update AB‑MCTS Models</strong> then <strong>Update Parameters</strong></li>
+                    </ul>
+                </li>
+                <li>Multi‑Model Configuration:
+                    <ul>
+                        <li>Select the same 2–3 models to start</li>
+                        <li>Click <strong>Update Multi‑Model Models</strong></li>
+                    </ul>
+                </li>
+            </ol>
+        </div>
+
+        <div class="card">
+            <h2>6) Try it</h2>
+            <ol>
                 <li>Open WebUI → pick a model (e.g., "AB‑MCTS" or "Multi‑Model")</li>
                 <li>Ask a question. For AB‑MCTS, expect a slower but deeper response.</li>
                 <li>Visit Evals: <a href="/evals.html">/evals.html</a> for charts and the tree view</li>
@@ -79,7 +107,7 @@ docker compose up -d</pre>
         </div>
 
         <div class="card">
-            <h2>5) Common fixes</h2>
+            <h2>7) Common fixes</h2>
             <ul>
                 <li>Nothing loads? Run <code>docker compose ps</code> to ensure all containers are Up</li>
                 <li>Prometheus/Grafana not loading? Wait 30–60 seconds after <code>docker compose up -d</code></li>

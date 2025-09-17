@@ -62,7 +62,8 @@ class ProperTreeQuestABMCTSService:
         
         # Discover available models and set defaults
         self.available_models = self.model_discovery.discover_models()
-        self.models = self.model_discovery.get_recommended_models(for_testing=True)
+        self._persist_path = os.getenv("MODEL_SELECTION_FILE", "/app/logs/selected_models_abmcts.json")
+        self.models = self._load_selected_models() or self.model_discovery.get_recommended_models(for_testing=True)
         
         # Sakana AI TreeQuest configuration
         self.algo_config = {
@@ -194,7 +195,7 @@ Enhanced Response:"""
         
         return node_state, quality
     
-    def run_proper_treequest_ab_mcts(self, query: str, iterations: int = 20, max_depth: int = 5) -> Dict[str, Any]:
+    def run_proper_treequest_ab_mcts(self, query: str, iterations: int = 20, max_depth: int = 5, include_tree: bool = False) -> Dict[str, Any]:
         """Run proper TreeQuest AB-MCTS algorithm."""
         start_time = time.time()
         
@@ -220,6 +221,7 @@ Enhanced Response:"""
             "response_time": 0.0
         }
         
+        iteration_log: List[Dict[str, Any]] = []
         for i in range(min(iterations, 20)):  # Limit to 20 iterations
             # Run one step of AB-MCTS
             search_tree = self.algo.step(search_tree, generate_fns)
@@ -227,6 +229,20 @@ Enhanced Response:"""
             # Get current state-score pairs
             state_score_pairs = self.algo.get_state_score_pairs(search_tree)
             search_stats["nodes_created"] = len(state_score_pairs)
+            if include_tree:
+                # Compact snapshot for visualization
+                iteration_log.append({
+                    "iteration": i + 1,
+                    "nodes": [
+                        {
+                            "model": getattr(state, 'model_name', getattr(state, 'model_used', 'unknown')),
+                            "quality": score,
+                            "search_type": getattr(state, 'search_type', getattr(state, 'eval_results', {}).get('search_type', 'unknown')),
+                            "preview": (getattr(state, 'generation_result', getattr(state, 'content', '')) or '')[:120]
+                        }
+                        for state, score in state_score_pairs[:100]
+                    ]
+                })
             
             # Count search types
             width_count = 0
@@ -271,7 +287,8 @@ Enhanced Response:"""
         
         return {
             "solution": best_solution,
-            "search_stats": search_stats
+            "search_stats": search_stats,
+            "iteration_log": iteration_log if include_tree else []
         }
     
     def update_models(self, model_names: List[str]) -> bool:
@@ -284,8 +301,9 @@ Enhanced Response:"""
             if unavailable:
                 print(f"Warning: Some models not available: {unavailable}")
             
-            # Update models list
+            # Update models list and persist
             self.models = [name for name in model_names if validation.get(name, False)]
+            self._save_selected_models()
             
             if not self.models:
                 print("Error: No valid models selected")
@@ -300,8 +318,8 @@ Enhanced Response:"""
     
     def get_available_models(self) -> List[Dict[str, Any]]:
         """Get list of available models with metadata."""
-        if not self.available_models:
-            self.available_models = self.model_discovery.discover_models()
+        # Always refresh to reflect current Ollama availability
+        self.available_models = self.model_discovery.discover_models()
         
         return [
             {
@@ -316,6 +334,27 @@ Enhanced Response:"""
             }
             for model in self.available_models
         ]
+
+    # -------- Persistence helpers --------
+    def _load_selected_models(self) -> List[str]:
+        try:
+            if os.path.exists(self._persist_path):
+                import json
+                with open(self._persist_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data.get("selected", [])
+        except Exception:
+            pass
+        return []
+
+    def _save_selected_models(self) -> None:
+        try:
+            os.makedirs(os.path.dirname(self._persist_path), exist_ok=True)
+            import json
+            with open(self._persist_path, "w", encoding="utf-8") as f:
+                json.dump({"selected": self.models}, f)
+        except Exception:
+            pass
     
     def process_query(self, query: str, iterations: int = 20, max_depth: int = 5, 
                      conversation_id: Optional[str] = None, models: Optional[List[str]] = None) -> QueryResponse:
@@ -326,7 +365,8 @@ Enhanced Response:"""
                 self.update_models(models)
             
             # Run proper TreeQuest AB-MCTS search
-            result = self.run_proper_treequest_ab_mcts(query, iterations, max_depth)
+            include_tree = True  # always capture for research; UI can ignore
+            result = self.run_proper_treequest_ab_mcts(query, iterations, max_depth, include_tree)
             
             # Create response
             response = QueryResponse(
@@ -334,7 +374,8 @@ Enhanced Response:"""
                 success=True,
                 search_stats=result["search_stats"],
                 conversation_id=conversation_id or str(uuid.uuid4()),
-                turn_id=str(uuid.uuid4())
+                turn_id=str(uuid.uuid4()),
+                iteration_log=result.get("iteration_log", [])
             )
             
             return response

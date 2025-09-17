@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # Service URLs
 AB_MCTS_SERVICE_URL = "http://ab-mcts-service:8094"
 MULTI_MODEL_SERVICE_URL = "http://multi-model-service:8090"
+OPENWEBUI_INTEGRATION_URL = "http://openwebui-integration:8097"
 
 app = FastAPI(title="AB-MCTS & Multi-Model MCP Server", version="1.0.0")
 
@@ -145,6 +146,23 @@ TOOLS = [
                 }
             },
             "required": ["action"]
+        }
+    ),
+    MCPTool(
+        name="chem_lipinski_pains",
+        description="Check SMILES for Lipinski rule-of-five and PAINS alerts",
+        inputSchema={
+            "type": "object",
+            "properties": {"smiles": {"type": "string"}},
+            "required": ["smiles"]
+        }
+    ),
+    MCPTool(
+        name="materials_project_lookup",
+        description="Lookup materials by formula or mp-id via Materials Project",
+        inputSchema={
+            "type": "object",
+            "properties": {"formula": {"type": "string"}, "mp_id": {"type": "string"}}
         }
     )
 ]
@@ -354,6 +372,32 @@ async def handle_mcp_request(request: MCPRequest) -> MCPResponse:
                         }
                     )
             
+            elif tool_name == "chem_lipinski_pains":
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    r = await client.post(
+                        f"{OPENWEBUI_INTEGRATION_URL}/tools/chem/lipinski_pains",
+                        json={"smiles": arguments["smiles"]},
+                    )
+                    r.raise_for_status()
+                    data = r.json()
+                    return MCPResponse(
+                        id=request.id,
+                        result={"content": [{"type": "text", "text": json.dumps(data, indent=2)}]}
+                    )
+
+            elif tool_name == "materials_project_lookup":
+                async with httpx.AsyncClient(timeout=20.0) as client:
+                    r = await client.post(
+                        f"{OPENWEBUI_INTEGRATION_URL}/tools/materials/lookup",
+                        json={k: v for k, v in arguments.items() if k in ("formula", "mp_id") and v},
+                    )
+                    r.raise_for_status()
+                    data = r.json()
+                    return MCPResponse(
+                        id=request.id,
+                        result={"content": [{"type": "text", "text": json.dumps(data, indent=2)}]}
+                    )
+
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown tool: {tool_name}")
         

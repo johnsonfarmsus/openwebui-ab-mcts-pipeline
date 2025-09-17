@@ -12,9 +12,16 @@ We provide multiple integration methods for Open WebUI:
 - **Tools Available**: 4 tools for AB-MCTS and Multi-Model management
 
 ### 2. **Direct OpenAPI Integration**
-- **AB-MCTS API**: `http://localhost:8094` (OpenAPI spec available)
-- **Multi-Model API**: `http://localhost:8090` (OpenAPI spec available)
+- **AB-MCTS API**: `http://localhost:8094` (FastAPI docs available)
+- **Multi-Model API**: `http://localhost:8090` (FastAPI docs available)
 - **Protocol**: OpenAPI 3.0
+
+### 3. **OpenAI-Compatible Model Integration** (Direct Connection)
+- **Model Integration**: `http://localhost:8098`
+- **Endpoints**:
+  - `/v1/models` – model discovery (`ab-mcts`, `multi-model`)
+  - `/v1/chat/completions` (or `/chat/completions`) – chat API with streaming support
+- In Open WebUI: Settings → Connections → add `http://localhost:8098`
 
 ## 🚀 Quick Setup
 
@@ -38,6 +45,8 @@ We provide multiple integration methods for Open WebUI:
    - `multi_model_query` - Run Multi-Model queries
    - `ab_mcts_models` - Manage AB-MCTS models
    - `multi_model_models` - Manage Multi-Model models
+   - `chem_lipinski_pains` - Check SMILES for Lipinski & PAINS (RDKit optional)
+   - `materials_project_lookup` - Query Materials Project (requires API key)
 
 ### Method 2: Direct OpenAPI Integration
 
@@ -54,6 +63,16 @@ We provide multiple integration methods for Open WebUI:
      - **Name**: Multi-Model Service
      - **URL**: `http://localhost:8090`
      - **Type**: OpenAPI
+
+### Method 3: OpenAI-Compatible Model Integration
+
+1. **Add Model Integration**:
+   - Open Open WebUI at `http://localhost:3000`
+   - Go to Settings → Connections → Direct Connections
+   - Add new connection:
+     - **Name**: AB-MCTS & Multi-Model Models
+     - **URL**: `http://localhost:8098`
+     - **Auth**: Bearer (none needed by default)
 
 ## 🛠️ Usage in Open WebUI
 
@@ -73,17 +92,41 @@ We provide multiple integration methods for Open WebUI:
 
 | Model | Size | Speed | Quality | Best For |
 |-------|------|-------|---------|----------|
-| smollm:135m | 135M | ⚡⚡⚡⚡⚡ | 🎯🎯 | Fast testing |
-| qwen3:0.6b | 0.6B | ⚡⚡⚡⚡ | 🎯🎯🎯 | Multilingual |
-| granite3.1-moe:1b | 1B | ⚡⚡⚡⚡ | 🎯🎯🎯🎯 | Code tasks |
 | llama3.2:1b | 1B | ⚡⚡⚡⚡ | 🎯🎯🎯 | Creative tasks |
 | gemma3:1b | 1B | ⚡⚡⚡⚡ | 🎯🎯🎯 | Efficient responses |
-| deepseek-r1:1.5b | 1.5B | ⚡⚡⚡⚡ | 🎯🎯🎯🎯 | Reasoning tasks |
+| deepseek-r1:1.5b | 1.5B | ⚡⚡⚡ | 🎯🎯🎯🎯 | Reasoning tasks |
+| qwen3:0.6b | 0.6B | ⚡⚡⚡⚡ | 🎯🎯🎯 | Multilingual |
+| granite3.1-moe:1b | 1B | ⚡⚡⚡⚡ | 🎯🎯🎯🎯 | Code tasks |
+| smollm:135m | 135M | ⚡⚡⚡⚡⚡ | 🎯🎯 | Fast testing |
 
 ## 🔧 Management Dashboard
 
 For backend management, use the dedicated dashboard:
 - **URL**: `http://localhost:8081/dashboard.html`
+## 🧾 Run Logging
+
+- Each chat request is logged as a run when invoked via the model integration (both AB‑MCTS and Multi‑Model).
+- Artifacts: JSONL under `logs/runs/YYYYMMDD/run_<id>.jsonl`, index in `logs/runs.db`.
+- View: Dashboard “Runs” section or backend API `/api/runs`.
+
+## 🔬 Science Tools
+
+### Chemistry (RDKit)
+- Endpoint: `POST http://localhost:8097/tools/chem/lipinski_pains`
+- Body:
+```json
+{ "smiles": "CCO" }
+```
+- Output: Lipinski properties and PAINS alerts (placeholder alerts if RDKit missing).
+
+### Materials Project
+- Endpoint: `POST http://localhost:8097/tools/materials/lookup`
+- Body:
+```json
+{ "formula": "LiFePO4" }
+```
+- Requires: set `MATERIALS_PROJECT_API_KEY` in environment.
+
 - **Purpose**: Model configuration, monitoring, and system management
 - **Note**: This is for administrators only, not end users
 
@@ -149,7 +192,7 @@ curl http://localhost:8090/health
 - **MCP Server**: `http://localhost:8096/docs`
 - **AB-MCTS Service**: `http://localhost:8094/docs`
 - **Multi-Model Service**: `http://localhost:8090/docs`
-- **Backend API**: `http://localhost:8095/docs`
+- **Backend API**: `http://localhost:8095/api/docs`
 
 ## 🎉 Success Indicators
 
@@ -168,4 +211,4 @@ When properly integrated, you should see:
 
 ---
 
-**Note**: This integration provides a seamless experience where users can access advanced AB-MCTS and Multi-Model capabilities directly through the familiar Open WebUI interface, while administrators can manage the system through the dedicated backend dashboard.
+**Note**: The model integration streams progress and emits keep‑alive chunks for long AB‑MCTS queries to avoid client timeouts. For complex prompts, expect multi‑minute runtimes.

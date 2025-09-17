@@ -120,6 +120,8 @@
   - `/api/pipelines/status` - Pipeline health status
   - `/api/pipelines/ab-mcts/*` - AB-MCTS management
   - `/api/pipelines/multi-model/*` - Multi-Model management
+  - `/api/runs/*` - Run listing and events
+  - `/api/monitoring/*` - Metrics/logs/health, WebSocket at `/api/monitoring/ws`
 
 ### **Docker Services**
 - `open-webui` - Main Open WebUI interface
@@ -163,20 +165,22 @@ openwebui-setup/
 ## 🎯 **Next Steps**
 
 ### **Immediate Priorities**
-1. **Fix Timeout Issues**
-   - Increase timeout to 600+ seconds
-   - Implement streaming responses
-   - Add progress indicators
+1. **Long‑running AB‑MCTS**
+   - Keep SSE streaming + periodic pings; ensure Open WebUI timeouts are ≥600s
+   - Add adaptive iteration/max_depth based on prompt complexity
+   - Expose per‑request overrides via model‑integration config
+   - Consider partial result streaming/early finish on confidence
 
-2. **Optimize Performance**
-   - Reduce AB-MCTS verbosity
+2. **Performance & Verbosity**
+   - Enforce max length/sections; post‑summarize
    - Implement response caching
-   - Add query complexity detection
+   - Add query classification for iteration selection
+   - Optimize per‑model temps/prompts
 
-3. **Improve User Experience**
-   - Add loading indicators in Open WebUI
-   - Implement response streaming
-   - Better error handling
+3. **Stability & Consistency**
+   - Refactor `backend/api/models.py` to remove legacy `models_db/default_models`
+   - Replace mocked monitoring returns with real metrics or clearly mark as demo
+   - Add auth/rate‑limits for public deployments
 
 ### **Future Enhancements**
 1. **Advanced Features**
@@ -208,19 +212,21 @@ openwebui-setup/
 ### **Management Access**
 - Dashboard: `http://localhost:8081/dashboard.html`
 - Tool Test: `http://localhost:8081/tool_test.html`
-- Backend API: `http://localhost:8095/docs`
+- Backend API: `http://localhost:8095/api/docs`
 
 ## 📊 **Performance Metrics**
-- AB-MCTS: 5-10 minutes for complex queries
-- Multi-Model: 1-3 minutes for collaborative responses
+- AB‑MCTS: multi‑minute on complex queries
+- Multi‑Model: 1–3 minutes
 - Model Discovery: <1 second
 - Health Checks: <1 second
 
 ## 🐛 **Known Issues**
-1. Timeout errors with complex AB-MCTS queries
-2. Verbose responses from AB-MCTS
-3. Occasional hallucination in responses
-4. Dashboard status updates may be delayed
+1. Long AB‑MCTS latencies on complex prompts
+2. Verbose responses (AB‑MCTS)
+3. Occasional hallucinations
+4. Monitoring endpoints partially mocked
+5. Inconsistent models API (`backend/api/models.py` legacy refs)
+6. Security hardening not fully implemented
 
 ## 📝 **Development Notes**
 - All services use Docker containers

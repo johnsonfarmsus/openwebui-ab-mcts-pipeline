@@ -17,6 +17,7 @@ class QueryRequest(BaseModel):
     models: List[str] = Field(default_factory=list, description="List of models to use")
     conversation_id: Optional[str] = Field(None, description="Conversation ID for context")
     previous_messages: List[Dict[str, str]] = Field(default_factory=list, description="Previous conversation messages")
+    include_tree: bool = Field(False, description="Include per-iteration log for visualization")
 
 
 class QueryResponse(BaseModel):
@@ -28,6 +29,7 @@ class QueryResponse(BaseModel):
     conversation_id: str = Field(default="", description="Conversation ID")
     turn_id: str = Field(default="", description="Turn ID")
     error: str = Field(default="", description="Error message if any")
+    iteration_log: List[Dict[str, Any]] = Field(default_factory=list, description="Per-iteration summary for visualization")
 
 
 @dataclass

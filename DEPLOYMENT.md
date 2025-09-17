@@ -57,6 +57,10 @@ LOG_LEVEL=info
 # AB-MCTS Configuration
 MAX_ITERATIONS=50
 MAX_DEPTH=10
+
+# Science Tools (optional)
+# Materials Project API (https://materialsproject.org/)
+MATERIALS_PROJECT_API_KEY=
 ```
 
 ### 3. Start Services
@@ -86,6 +90,11 @@ curl http://localhost:8090/health
 
 # Check Backend API
 curl http://localhost:8095/health
+# Backend API docs
+curl http://localhost:8095/api/docs | head -n 1
+
+# Check Open WebUI Integration Tools
+curl http://localhost:8097/tools
 ```
 
 ## 🐳 Docker Configuration
@@ -106,6 +115,7 @@ services:
       - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
     volumes:
       - open-webui:/app/backend/data
+      - logs:/app/logs
     networks:
       - openwebui-net
     restart: always
@@ -121,7 +131,7 @@ services:
     networks:
       - openwebui-net
     restart: always
-    command: ["python", "treequest_ab_mcts_service.py"]
+    command: ["python", "backend/services/proper_treequest_ab_mcts_service.py"]
 
   multi-model-service:
     build: .
@@ -134,7 +144,42 @@ services:
     networks:
       - openwebui-net
     restart: always
-    command: ["python", "ab_mcts_service.py"]
+    command: ["python", "backend/services/proper_multi_model_service.py"]
+  model-integration:
+    build: .
+    container_name: model-integration
+    ports:
+      - "8098:8098"
+    environment:
+      - AB_MCTS_SERVICE_URL=http://ab-mcts-service:8094
+      - MULTI_MODEL_SERVICE_URL=http://multi-model-service:8090
+    networks:
+      - openwebui-net
+    restart: always
+    command: ["python", "backend/model_integration.py"]
+
+  openwebui-integration:
+    build: .
+    container_name: openwebui-integration
+    ports:
+      - "8097:8097"
+    environment:
+      - AB_MCTS_SERVICE_URL=http://ab-mcts-service:8094
+      - MULTI_MODEL_SERVICE_URL=http://multi-model-service:8090
+    networks:
+      - openwebui-net
+    restart: always
+    command: ["python", "backend/openwebui_integration.py"]
+
+  mcp-server:
+    build: .
+    container_name: mcp-server
+    ports:
+      - "8096:8096"
+    networks:
+      - openwebui-net
+    restart: always
+    command: ["python", "backend/mcp_server.py"]
 
   backend-api:
     build: .
@@ -148,13 +193,8 @@ services:
       - openwebui-net
     restart: always
     command: ["python", "backend/api/main.py"]
-
-networks:
-  openwebui-net:
-    driver: bridge
-
-volumes:
-  open-webui:
+    volumes:
+      - logs:/app/logs
 ```
 
 ### Dockerfile
@@ -176,11 +216,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application files
 COPY . .
 
-# Expose port
-EXPOSE 8090
+# Expose ports used by services (compose maps as needed)
+EXPOSE 8090 8094 8095 8096 8097 8098 8080
 
-# Run the service
-CMD ["python", "main.py"]
+# Default command (overridden per service by docker-compose)
+CMD ["python", "backend/api/main.py"]
 ```
 
 ## 🔧 Production Deployment
@@ -209,6 +249,9 @@ LOG_LEVEL=warning
 # Monitoring
 ENABLE_METRICS=true
 METRICS_PORT=9090
+
+# Science Tools
+MATERIALS_PROJECT_API_KEY=
 ```
 
 ### 2. Production Docker Compose
@@ -311,8 +354,8 @@ docker stats
 # Check container logs for errors
 docker-compose logs | grep ERROR
 
-# Monitor API performance
-curl http://localhost:8095/api/performance
+# Monitor API performance (monitoring router)
+curl http://localhost:8095/api/monitoring/performance
 ```
 
 ## 🔄 Updates & Maintenance

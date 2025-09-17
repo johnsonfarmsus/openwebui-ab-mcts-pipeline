@@ -75,46 +75,45 @@ openwebui-setup/
 ├── requirements.txt             # Production dependencies
 ├── requirements-dev.txt         # Development dependencies
 ├── docker-compose.yml           # Development orchestration
-├── docker-compose.prod.yml      # Production orchestration
+├── docker-compose.prod.yml      # (Optional) production orchestration
 ├── Dockerfile                   # Container definition
 ├── .env.example                 # Environment template
 ├── .gitignore                   # Git ignore rules
 ├── .pre-commit-config.yaml      # Pre-commit hooks
 ├── pytest.ini                  # Test configuration
 ├── pyproject.toml              # Python project config
-├── pipelines/                   # Open WebUI pipelines
-│   ├── __init__.py
-│   ├── ab_mcts_pipeline.py     # AB-MCTS pipeline
-│   └── multi_model_pipeline.py # Multi-model pipeline
-├── backend/                     # Backend management
+├── pipelines/                   # (Legacy/optional) pipeline artifacts
+│   └── ab_mcts_pipeline.py
+├── backend/                     # Backend & services
 │   ├── __init__.py
 │   ├── api/                    # FastAPI endpoints
 │   │   ├── __init__.py
-│   │   ├── main.py            # API main
-│   │   ├── models.py          # Data models
+│   │   ├── main.py            # API main (8095)
+│   │   ├── models.py          # Model management endpoints
 │   │   ├── pipelines.py       # Pipeline endpoints
 │   │   └── monitoring.py      # Monitoring endpoints
 │   ├── services/              # Business logic
 │   │   ├── __init__.py
-│   │   ├── ab_mcts_service.py # AB-MCTS service
-│   │   ├── multi_model_service.py # Multi-model service
-│   │   └── model_manager.py   # Model management
+│   │   ├── proper_treequest_ab_mcts_service.py # AB‑MCTS service (8094)
+│   │   ├── proper_multi_model_service.py       # Multi‑Model service (8090)
+│   │   ├── experiment_logger.py               # Runs (SQLite + JSONL)
+│   │   └── config_manager.py                  # Config management
+│   ├── model_integration.py    # OpenAI‑compatible models (8098)
+│   └── openwebui_integration.py# Tools (8097)
 │   ├── models/                # Data models
 │   │   ├── __init__.py
 │   │   ├── llm_state.py       # LLM state model
 │   │   ├── search_stats.py    # Search statistics
 │   │   └── model_config.py    # Model configuration
-│   └── dashboard/             # Web dashboard
-│       ├── static/            # Static files
-│       ├── templates/         # HTML templates
-│       └── main.py           # Dashboard main
+│   └── dashboard/             # Web dashboard (static)
 ├── services/                  # Standalone services
 │   ├── ab_mcts_service.py    # AB-MCTS service
 │   ├── multi_model_service.py # Multi-model service
 │   └── treequest_ab_mcts_service.py # TreeQuest implementation
 ├── interfaces/                # User interfaces
+│   ├── dashboard.html
 │   ├── conversational_ab_mcts_interface.html
-│   └── multi_model_interface.html
+│   └── tool_test.html
 ├── tests/                     # Test suite
 │   ├── __init__.py
 │   ├── conftest.py           # Test configuration
@@ -182,17 +181,17 @@ pre-commit run --all-files
 ```python
 # tests/test_ab_mcts.py
 import pytest
-from services.treequest_ab_mcts_service import TreeQuestABMCTSService
+from backend.services.proper_treequest_ab_mcts_service import ProperTreeQuestABMCTSService
 
 class TestABMCTS:
     def test_basic_query(self):
-        service = TreeQuestABMCTSService()
+        service = ProperTreeQuestABMCTSService()
         result = service.process_query("What is AI?")
         assert result.success == True
         assert len(result.result) > 0
     
     def test_anti_hallucination(self):
-        service = TreeQuestABMCTSService()
+        service = ProperTreeQuestABMCTSService()
         result = service.process_query("How many chocolate chips?")
         assert "I don't have verified information" in result.result
 ```
@@ -206,7 +205,7 @@ from unittest.mock import Mock, patch
 
 @pytest.fixture
 def mock_ollama():
-    with patch('services.treequest_ab_mcts_service.requests.post') as mock_post:
+    with patch('backend.services.proper_treequest_ab_mcts_service.requests.post') as mock_post:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"response": "Test response"}
@@ -241,10 +240,10 @@ def test_ab_mcts_api():
 ollama serve
 
 # Start AB-MCTS service
-python services/treequest_ab_mcts_service.py
+python backend/services/proper_treequest_ab_mcts_service.py
 
 # Start Multi-Model service
-python services/ab_mcts_service.py
+python backend/services/proper_multi_model_service.py
 
 # Start Backend API
 python backend/api/main.py
@@ -367,7 +366,7 @@ def your_function():
 curl http://localhost:8094/health
 
 # Monitor performance
-curl http://localhost:8095/api/performance
+curl http://localhost:8095/api/monitoring/performance
 
 # View logs
 tail -f logs/ab_mcts.log
@@ -376,11 +375,8 @@ tail -f logs/ab_mcts.log
 ### 2. Development Dashboard
 
 ```bash
-# Start development dashboard
-python backend/dashboard/main.py
-
-# Access dashboard
-open http://localhost:8095/dashboard
+# Access static dashboard (served by docker-compose http-server)
+open http://localhost:8081/dashboard.html
 ```
 
 ## 🔧 Configuration Management
@@ -416,17 +412,23 @@ from typing import Dict, Any
 
 @dataclass
 class ModelConfig:
+    id: str
     name: str
     endpoint: str
     parameters: Dict[str, Any]
     enabled: bool = True
+    performance_score: float = 0.0
+    usage_count: int = 0
     
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "id": self.id,
             "name": self.name,
             "endpoint": self.endpoint,
             "parameters": self.parameters,
-            "enabled": self.enabled
+            "enabled": self.enabled,
+            "performance_score": self.performance_score,
+            "usage_count": self.usage_count
         }
 ```
 

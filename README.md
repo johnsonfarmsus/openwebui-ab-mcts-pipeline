@@ -60,24 +60,37 @@ openwebui-setup/
 ├── ARCHITECTURE.md                     # Detailed architecture docs
 ├── API_REFERENCE.md                    # API documentation
 ├── DEPLOYMENT.md                       # Deployment instructions
+├── OPENWEBUI_INTEGRATION.md            # Open WebUI integration guide
 ├── docker-compose.yml                  # Docker orchestration
 ├── Dockerfile                          # Container definition
 ├── requirements.txt                    # Python dependencies
-├── pipelines/                          # Open WebUI pipelines
-│   ├── ab_mcts_pipeline.py            # AB-MCTS pipeline
-│   └── multi_model_pipeline.py        # Multi-model pipeline
-├── backend/                           # Backend management
-│   ├── api/                          # FastAPI endpoints
-│   ├── models/                       # Data models
-│   ├── services/                     # Business logic
-│   └── dashboard/                    # Web dashboard
-├── services/                         # Standalone services
-│   ├── ab_mcts_service.py           # AB-MCTS service
-│   ├── multi_model_service.py       # Multi-model service
-│   └── treequest_ab_mcts_service.py # TreeQuest implementation
-└── interfaces/                       # User interfaces
-    ├── conversational_ab_mcts_interface.html
-    └── multi_model_interface.html
+├── backend/                            # Backend and services
+│   ├── api/                            # FastAPI management API
+│   │   ├── main.py                     # API entrypoint (port 8095)
+│   │   ├── pipelines.py                # Proxies to services
+│   │   ├── models.py                   # Model management endpoints
+│   │   ├── config.py                   # Config management endpoints
+│   │   └── monitoring.py               # Monitoring and websockets
+│   ├── models/                         # Data models
+│   │   ├── llm_state.py
+│   │   ├── model_config.py
+│   │   ├── query_models.py
+│   │   └── search_stats.py
+│   ├── services/                       # Business logic services
+│   │   ├── proper_treequest_ab_mcts_service.py  # AB-MCTS (port 8094)
+│   │   ├── proper_multi_model_service.py        # Multi-Model (port 8090)
+│   │   ├── experiment_logger.py                 # SQLite + JSONL runs
+│   │   └── config_manager.py                    # Config management
+│   ├── model_integration.py           # OpenAI-compatible model adapter (8098)
+│   └── openwebui_integration.py       # Tool endpoints for Open WebUI (8097)
+├── interfaces/                         # Static interfaces
+│   ├── dashboard.html                  # Management dashboard (served on 8081)
+│   ├── conversational_ab_mcts_interface.html
+│   ├── real_ab_mcts_interface.html
+│   └── tool_test.html
+├── pipelines/                          # (Optional) pipeline artifacts
+│   └── ab_mcts_pipeline.py
+└── docs/                               # Additional docs
 ```
 
 ## 🚀 Quick Start
@@ -98,8 +111,8 @@ docker-compose up -d
 
 # Access interfaces
 # Open WebUI: http://localhost:3000
-# AB-MCTS Interface: http://localhost:8080/conversational_ab_mcts_interface.html
-# Backend Dashboard: http://localhost:8095
+# Management Dashboard: http://localhost:8081/dashboard.html
+# Backend API docs: http://localhost:8095/api/docs
 ```
 
 ## 🔧 Services
@@ -110,7 +123,10 @@ docker-compose up -d
 | AB-MCTS Service | 8094 | TreeQuest AB-MCTS implementation |
 | Multi-Model Service | 8090 | Simple multi-model collaboration |
 | Backend API | 8095 | Management dashboard API |
-| HTTP Server | 8080 | Static file serving |
+| MCP Server | 8096 | Tools bridge for Open WebUI |
+| Open WebUI Integration | 8097 | Tool endpoints (OpenAPI) |
+| Model Integration | 8098 | OpenAI-compatible model adapter |
+| HTTP Server | 8081 | Static dashboard (`/dashboard.html`) |
 
 ## 📊 Current Status
 
@@ -125,9 +141,12 @@ docker-compose up -d
 - [x] Real-time monitoring and analytics
 
 ### 🚧 Current Issues
-- [ ] **Timeout Problems**: AB-MCTS taking >300 seconds (needs optimization)
-- [ ] **Performance Issues**: Extremely verbose responses
-- [ ] **Response Quality**: Occasional hallucination in outputs
+- [ ] **Timeouts**: AB‑MCTS can exceed 300–600s on complex prompts; streaming keep‑alives mitigate UI timeouts but latency remains high
+- [ ] **Verbosity**: AB‑MCTS responses can be overly long; needs length/structure controls
+- [ ] **Quality drift**: Occasional hallucinations; add stricter validation/fact‑checking
+- [ ] **Inconsistent model API**: `backend/api/models.py` mixes `ModelManager` with undefined `models_db/default_models`
+- [ ] **Monitoring placeholders**: Some monitoring endpoints return mocked/aggregated data
+- [ ] **Security hardening**: Auth/rate‑limits noted in docs but not fully enforced in code
 
 ### 📋 Next Priorities
 - [ ] Fix timeout issues with streaming responses
@@ -135,6 +154,42 @@ docker-compose up -d
 - [ ] Improve response quality and accuracy
 - [ ] Add loading indicators and better UX
 - [ ] Implement response caching
+
+## 🧾 Runs & Logging
+
+- Where: `logs/` (shared volume). Structure:
+  - `logs/runs.db` (SQLite index)
+  - `logs/runs/YYYYMMDD/run_<id>.jsonl` (JSONL event stream per run)
+- View in UI: `http://localhost:8081/dashboard.html` → “Runs” card
+- API:
+  - `GET http://localhost:8095/api/runs?limit=50`
+  - `GET http://localhost:8095/api/runs/{run_id}`
+  - `GET http://localhost:8095/api/runs/{run_id}/events?head=200`
+
+## 🔬 Science Tools (optional)
+
+Two helper tools are exposed for sanity checks in chemistry and materials:
+
+- Chemistry: `chem_lipinski_pains` (RDKit-based)
+  - Endpoint: `POST http://localhost:8097/tools/chem/lipinski_pains`
+  - Body: `{ "smiles": "CCO" }`
+  - RDKit is optional; if not installed in the image, the endpoint returns a clear error.
+
+- Materials Project: `materials_project_lookup`
+  - Endpoint: `POST http://localhost:8097/tools/materials/lookup`
+  - Body: `{ "formula": "LiFePO4" }` or `{ "mp_id": "mp-149" }`
+  - Requires `MATERIALS_PROJECT_API_KEY`.
+
+Use these tools via:
+- Open WebUI Tools (connect MCP server at `http://localhost:8096`) → tools appear in the Tools panel, or
+- Direct HTTP requests, or
+- From pipelines/services as sub-calls.
+
+## ⚙️ Configuration Notes
+
+- Set `MATERIALS_PROJECT_API_KEY` to enable Materials Project lookups.
+- Logging directory can be controlled with `LOGS_DIR` (defaults to `/app/logs` in containers).
+- Open WebUI model integration: either add `http://localhost:8098` as a Direct Connection (OpenAI‑compatible) or set `OPENAI_API_BASE_URLS` to include `http://model-integration:8098` in Docker.
 
 ## 🤝 Contributing
 

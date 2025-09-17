@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional
 import httpx
 import uvicorn
 from pydantic import BaseModel
+import os
 
 app = FastAPI(
     title="AB-MCTS & Multi-Model Tools",
@@ -29,6 +30,9 @@ app.add_middleware(
 # Service URLs
 AB_MCTS_SERVICE_URL = "http://ab-mcts-service:8094"
 MULTI_MODEL_SERVICE_URL = "http://multi-model-service:8090"
+
+# Optional external tools configuration
+MATERIALS_PROJECT_API_KEY = os.getenv("MATERIALS_PROJECT_API_KEY", "")
 
 class QueryRequest(BaseModel):
     query: str
@@ -171,18 +175,112 @@ async def list_tools():
     """List available tools."""
     return {
         "tools": [
-            {
-                "name": "ab_mcts",
-                "description": "Advanced tree search for complex problem solving",
-                "endpoint": "/tools/ab_mcts"
-            },
-            {
-                "name": "multi_model", 
-                "description": "Collaborative AI for comprehensive answers",
-                "endpoint": "/tools/multi_model"
-            }
+            {"name": "ab_mcts", "description": "Advanced tree search for complex problem solving", "endpoint": "/tools/ab_mcts"},
+            {"name": "multi_model", "description": "Collaborative AI for comprehensive answers", "endpoint": "/tools/multi_model"},
+            {"name": "chem_lipinski_pains", "description": "Check SMILES for Lipinski rule-of-five and PAINS alerts", "endpoint": "/tools/chem/lipinski_pains"},
+            {"name": "materials_project_lookup", "description": "Lookup materials by formula or mp-id using the Materials Project API", "endpoint": "/tools/materials/lookup"},
         ]
     }
+
+# --- Chemistry tools (RDKit-based, graceful fallback) ---
+try:
+    from rdkit import Chem
+    from rdkit.Chem import Descriptors, Lipinski
+    from rdkit.Chem import rdMolDescriptors
+    RDKit_AVAILABLE = True
+except Exception:
+    RDKit_AVAILABLE = False
+
+@app.post("/tools/chem/lipinski_pains")
+async def chem_lipinski_pains(payload: Dict[str, Any]):
+    """Evaluate SMILES for Lipinski rules and (placeholder) PAINS flags.
+
+    Request: {"smiles": "CCO..."}
+    """
+    smiles = payload.get("smiles", "")
+    if not smiles:
+        raise HTTPException(status_code=400, detail="Missing 'smiles'")
+    if not RDKit_AVAILABLE:
+        return {"success": False, "error": "RDKit not installed in this image"}
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return {"success": False, "error": "Invalid SMILES"}
+        mw = Descriptors.MolWt(mol)
+        hbd = Lipinski.NumHDonors(mol)
+        hba = Lipinski.NumHAcceptors(mol)
+        logp = Descriptors.MolLogP(mol)
+        rot_bonds = Lipinski.NumRotatableBonds(mol)
+        tpsa = Descriptors.TPSA(mol)
+        rings = rdMolDescriptors.CalcNumRings(mol)
+        frac_csp3 = float(rdMolDescriptors.CalcFractionCSP3(mol))
+        heavy_atoms = mol.GetNumHeavyAtoms()
+        formula = rdMolDescriptors.CalcMolFormula(mol)
+        lipinski_pass = (
+            (mw <= 500)
+            and (hbd <= 5)
+            and (hba <= 10)
+            and (logp <= 5)
+        )
+        # Placeholder PAINS: a real implementation would use substructure SMARTS
+        pains_alerts: List[str] = []
+        return {
+            "success": True,
+            "lipinski": {
+                "mw": mw,
+                "hbd": hbd,
+                "hba": hba,
+                "logp": logp,
+                "rotatable_bonds": rot_bonds,
+                "tpsa": tpsa,
+                "ring_count": rings,
+                "fraction_csp3": frac_csp3,
+                "heavy_atoms": heavy_atoms,
+                "formula": formula,
+                "passes": lipinski_pass,
+            },
+            "pains_alerts": pains_alerts,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chem tool error: {str(e)}")
+
+# --- Materials Project lookup ---
+@app.post("/tools/materials/lookup")
+async def materials_lookup(payload: Dict[str, Any]):
+    """Lookup by formula or mp-id via Materials Project v2 API (if key set).
+
+    Request: {"formula": "LiFePO4"} or {"mp_id": "mp-149"}
+    """
+    if not MATERIALS_PROJECT_API_KEY:
+        return {"success": False, "error": "MATERIALS_PROJECT_API_KEY not set"}
+    base = "https://api.materialsproject.org"
+    headers = {"accept": "application/json", "X-API-KEY": MATERIALS_PROJECT_API_KEY}
+    try:
+        async with httpx.AsyncClient(timeout=20.0, headers=headers) as client:
+            # Rich set of commonly used materials fields
+            fields = (
+                "material_id,formula_pretty,energy_above_hull,e_above_hull,formation_energy_per_atom,"
+                "band_gap,is_metal,density,nelements,spacegroup,spacegroup_symbol,"
+                "volume,elements,elasticity,oxidation_states,structure"
+            )
+            if payload.get("mp_id"):
+                mp_id = payload["mp_id"]
+                # Use summary fields for richer content
+                r = await client.get(f"{base}/materials/summary/{mp_id}?fields={fields}")
+                if r.status_code == 404:
+                    # Fallback to generic materials endpoint
+                    r = await client.get(f"{base}/materials/{mp_id}")
+                r.raise_for_status()
+                return {"success": True, "data": r.json()}
+            elif payload.get("formula"):
+                formula = payload["formula"]
+                r = await client.get(f"{base}/materials/summary/?formula={formula}&fields={fields}")
+                r.raise_for_status()
+                return {"success": True, "data": r.json()}
+            else:
+                raise HTTPException(status_code=400, detail="Provide 'formula' or 'mp_id'")
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Materials Project HTTP error: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8097)

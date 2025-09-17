@@ -15,6 +15,7 @@ Thank you for your interest in contributing to this project! This document provi
 2. Clone your fork: `git clone https://github.com/yourusername/openwebui-ab-mcts.git`
 3. Initialize submodules: `git submodule update --init --recursive`
 4. Start services: `docker-compose up -d`
+5. Access Open WebUI at `http://localhost:3000` and Backend API docs at `http://localhost:8095/api/docs`
 
 ## 📝 Contribution Guidelines
 
@@ -62,6 +63,8 @@ docker-compose exec backend-api python -m pytest tests/test_ab_mcts.py
 - Update README.md for major changes
 - Update API_REFERENCE.md for API changes
 - Update ARCHITECTURE.md for architectural changes
+- Update DEPLOYMENT.md when docker-compose or commands change
+- Update PROJECT_STATUS.md and PROJECT_HANDOFF_PROMPT.md when limitations/status change
 - Add inline comments for complex logic
 
 ## 🐛 Bug Reports

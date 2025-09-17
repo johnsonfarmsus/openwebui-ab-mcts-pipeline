@@ -13,13 +13,22 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - WEBUI_SECRET_KEY=your-secret-key-here
+      - WEBUI_REQUEST_TIMEOUT=600
+      - WEBUI_STREAM_TIMEOUT=600
+      - AIOHTTP_CLIENT_TIMEOUT=600
+      - ENABLE_OPENAI_API=True
+      - OPENAI_API_BASE_URLS=https://api.openai.com/v1;http://model-integration:8098
+      - OPENAI_API_KEYS=sk-dummy;dummy-key
     volumes:
       - open-webui:/app/backend/data
+      - logs:/app/logs
     networks:
       - openwebui-net
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - model-integration
 
   # AB-MCTS Service (Sakana AI implementation with Thompson Sampling)
   ab-mcts-service:
@@ -35,6 +44,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["python", "backend/services/proper_treequest_ab_mcts_service.py"]
+    volumes:
+      - logs:/app/logs
 
   # Multi-Model Service (Proper implementation with sophisticated collaboration)
   multi-model-service:
@@ -50,6 +61,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["python", "backend/services/proper_multi_model_service.py"]
+    volumes:
+      - logs:/app/logs
 
   # Backend Management API
   backend-api:
@@ -66,6 +79,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["python", "backend/api/main.py"]
+    volumes:
+      - logs:/app/logs
 
   # HTTP Server for interfaces
   # MCP Server for Open WebUI Integration
@@ -93,12 +108,15 @@ services:
     environment:
       - AB_MCTS_SERVICE_URL=http://ab-mcts-service:8094
       - MULTI_MODEL_SERVICE_URL=http://multi-model-service:8090
+      - MATERIALS_PROJECT_API_KEY=${MATERIALS_PROJECT_API_KEY}
     networks:
       - openwebui-net
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["python", "backend/openwebui_integration.py"]
+    volumes:
+      - logs:/app/logs
 
   # Model Integration Service
   model-integration:
@@ -109,6 +127,7 @@ services:
     environment:
       - AB_MCTS_SERVICE_URL=http://ab-mcts-service:8094
       - MULTI_MODEL_SERVICE_URL=http://multi-model-service:8090
+      - MATERIALS_PROJECT_API_KEY=${MATERIALS_PROJECT_API_KEY}
     networks:
       - openwebui-net
     restart: always
@@ -130,3 +149,4 @@ services:
 
 volumes:
   open-webui:
+  logs:

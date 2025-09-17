@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evals & Visualizations</title>
+    <style>
+        body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: #f7f8fb; margin: 0; }
+        .nav { background:#222; color:#fff; padding:12px 16px; display:flex; justify-content:space-between; align-items:center; }
+        .nav a { color:#8ab4f8; text-decoration:none; margin-left: 12px; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+        .card { background:#fff; border:1px solid #e9ecef; border-radius:10px; padding:16px; margin-bottom:16px; }
+        .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+        .controls label { display:block; font-weight:600; margin-top:8px; }
+        .controls input, .controls select { padding:8px; width:100%; border:1px solid #dcdfe6; border-radius:6px; }
+        pre { background:#0f172a; color:#e2e8f0; padding:12px; border-radius:8px; overflow:auto; }
+        table { width:100%; border-collapse:collapse; }
+        th, td { text-align:left; padding:8px; border-bottom:1px solid #eee; }
+        .badge { display:inline-block; padding:2px 8px; border-radius:10px; background:#eef2ff; color:#3730a3; font-size:12px; }
+    </style>
+    <script>
+        const API_BASE = 'http://localhost:8095';
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadRuns();
+        });
+
+        async function loadRuns() {
+            const res = await fetch(`${API_BASE}/api/runs?limit=100`);
+            const data = await res.json();
+            const rows = (data.runs || []).map(r => `
+                <tr>
+                    <td>${new Date(r.started_at * 1000).toLocaleString()}</td>
+                    <td>${r.pipeline}</td>
+                    <td><span class="badge">${r.status}</span></td>
+                    <td><button onclick="viewRun('${r.run_id}')">View</button></td>
+                </tr>
+            `).join('');
+            document.getElementById('runs-body').innerHTML = rows;
+        }
+
+        async function viewRun(runId) {
+            const [metaRes, eventsRes] = await Promise.all([
+                fetch(`${API_BASE}/api/runs/${runId}`),
+                fetch(`${API_BASE}/api/runs/${runId}/events`)
+            ]);
+            const meta = await metaRes.json();
+            const events = await eventsRes.json();
+            document.getElementById('run-meta').textContent = JSON.stringify(meta, null, 2);
+            document.getElementById('run-events').textContent = JSON.stringify(events.events || [], null, 2);
+
+            // Try to find an iteration_log event inside response_received data_head or later
+            const last = (events.events || []).slice(-50);
+            let iterationLog = [];
+            try {
+                // If service emits iteration_log in final result, attach it via meta.result
+                if (meta && meta.result && meta.result.iteration_log) {
+                    iterationLog = meta.result.iteration_log;
+                }
+            } catch (e) {}
+            document.getElementById('mcts-text').textContent = renderTextTree(iterationLog);
+        }
+
+        function renderTextTree(iterationLog) {
+            if (!Array.isArray(iterationLog) || iterationLog.length === 0) {
+                return 'No iteration log available for this run.';
+            }
+            const lines = [];
+            for (const it of iterationLog) {
+                lines.push(`Iteration ${it.iteration}`);
+                (it.nodes || []).slice(0, 12).forEach((n, idx) => {
+                    lines.push(`  - ${idx+1}. [${n.search_type||'?'}/${(n.model||'unknown')}] q=${Number(n.quality).toFixed(3)} :: ${n.preview||''}`);
+                });
+                lines.push('');
+            }
+            return lines.join('\n');
+        }
+    </script>
+</head>
+<body>
+    <div class="nav">
+        <div>Evals & Visualizations</div>
+        <div>
+            <a href="/dashboard.html">Dashboard</a>
+        </div>
+    </div>
+    <div class="container">
+        <div class="card">
+            <div class="grid">
+                <div class="controls">
+                    <label>Filter by pipeline</label>
+                    <select id="pipeline-filter" onchange="loadRuns()">
+                        <option value="">All</option>
+                        <option>ab-mcts</option>
+                        <option>multi-model</option>
+                    </select>
+                </div>
+                <div>
+                    <p>Pick a run and view metadata, event log, and a text MCTS tree.</p>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <h3>Recent Runs</h3>
+            <table>
+                <thead>
+                    <tr><th>Started</th><th>Pipeline</th><th>Status</th><th>Action</th></tr>
+                </thead>
+                <tbody id="runs-body"></tbody>
+            </table>
+        </div>
+        <div class="grid">
+            <div class="card">
+                <h3>Run Metadata</h3>
+                <pre id="run-meta">Select a run...</pre>
+            </div>
+            <div class="card">
+                <h3>Event Log (JSONL)</h3>
+                <pre id="run-events">Select a run...</pre>
+            </div>
+        </div>
+        <div class="card">
+            <h3>MCTS Text Visualization</h3>
+            <pre id="mcts-text">Select a run...</pre>
+        </div>
+    </div>
+</body>
+</html>
+

@@ -18,6 +18,10 @@ from backend.api.monitoring import router as monitoring_router
 from backend.api.models import router as models_router
 from backend.api.config import router as config_router
 
+# New: runs endpoints
+from fastapi import APIRouter
+from backend.services.experiment_logger import ExperimentLogger
+
 # Create FastAPI app
 app = FastAPI(
     title="AB-MCTS & Multi-Model Backend API",
@@ -41,6 +45,27 @@ app.include_router(pipelines_router, prefix="/api/pipelines", tags=["pipelines"]
 app.include_router(monitoring_router, prefix="/api/monitoring", tags=["monitoring"])
 app.include_router(models_router, prefix="/api/models", tags=["models"])
 app.include_router(config_router, prefix="/api/config", tags=["configuration"])
+
+# Runs API
+runs_router = APIRouter()
+logger = ExperimentLogger()
+
+@runs_router.get("/")
+async def list_runs(limit: int = 100):
+    return {"runs": logger.list_runs(limit=limit)}
+
+@runs_router.get("/{run_id}")
+async def get_run(run_id: str):
+    run = logger.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
+
+@runs_router.get("/{run_id}/events")
+async def get_run_events(run_id: str, head: int | None = 200):
+    return {"events": logger.read_events(run_id, head=head)}
+
+app.include_router(runs_router, prefix="/api/runs", tags=["runs"])
 
 # Mount static files for dashboard
 dashboard_path = os.path.join(os.path.dirname(__file__), "..", "dashboard", "static")

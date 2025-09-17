@@ -50,8 +50,9 @@ class ProperMultiModelService:
         self.available_models = self.model_discovery.discover_models()
         self.models = self._initialize_model_configs()
         
-        # Set default selected models
-        self.selected_models = self.model_discovery.get_recommended_models(for_testing=True)
+        # Persist last selection
+        self._persist_path = os.getenv("MODEL_SELECTION_FILE", "/app/logs/selected_models_multi.json")
+        self.selected_models = self._load_selected_models() or self.model_discovery.get_recommended_models(for_testing=True)
     
     def _initialize_model_configs(self) -> Dict[str, Dict[str, Any]]:
         """Initialize model configurations based on discovered models."""
@@ -304,8 +305,9 @@ Synthesized Answer:"""
             if unavailable:
                 print(f"Warning: Some models not available: {unavailable}")
             
-            # Update selected models list
+            # Update selected models list and persist
             self.selected_models = [name for name in model_names if validation.get(name, False)]
+            self._save_selected_models()
             
             if not self.selected_models:
                 print("Error: No valid models selected")
@@ -320,8 +322,8 @@ Synthesized Answer:"""
     
     def get_available_models(self) -> List[Dict[str, Any]]:
         """Get list of available models with metadata."""
-        if not self.available_models:
-            self.available_models = self.model_discovery.discover_models()
+        # Always refresh on request
+        self.available_models = self.model_discovery.discover_models()
         
         return [
             {
@@ -337,6 +339,27 @@ Synthesized Answer:"""
             }
             for model in self.available_models
         ]
+
+    # -------- Persistence helpers --------
+    def _load_selected_models(self) -> List[str]:
+        try:
+            if os.path.exists(self._persist_path):
+                import json
+                with open(self._persist_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data.get("selected", [])
+        except Exception:
+            pass
+        return []
+
+    def _save_selected_models(self) -> None:
+        try:
+            os.makedirs(os.path.dirname(self._persist_path), exist_ok=True)
+            import json
+            with open(self._persist_path, "w", encoding="utf-8") as f:
+                json.dump({"selected": self.selected_models}, f)
+        except Exception:
+            pass
     
     def process_query(self, query: str, models: Optional[List[str]] = None) -> QueryResponse:
         """Process a query using sophisticated multi-model collaboration."""

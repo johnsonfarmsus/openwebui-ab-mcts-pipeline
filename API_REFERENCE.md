@@ -143,7 +143,7 @@ Remove a model.
 
 #### Performance Monitoring
 
-##### GET /api/performance
+##### GET /api/monitoring/performance
 Get performance metrics.
 
 **Response:**
@@ -169,7 +169,7 @@ Get performance metrics.
 }
 ```
 
-##### GET /api/logs
+##### GET /api/monitoring/logs
 Get system logs.
 
 **Query Parameters:**
@@ -195,7 +195,7 @@ Get system logs.
 
 #### A/B Testing
 
-##### POST /api/ab-test
+##### POST /api/models/ab-test
 Start an A/B test.
 
 **Request Body:**
@@ -218,7 +218,7 @@ Start an A/B test.
 }
 ```
 
-##### GET /api/ab-test/{id}/results
+##### GET /api/models/ab-test/{id}/results
 Get A/B test results.
 
 **Response:**
@@ -357,14 +357,14 @@ curl -X POST http://localhost:8095/api/models \
 ### Get Performance Metrics
 
 ```bash
-curl http://localhost:8095/api/performance
+curl http://localhost:8095/api/monitoring/performance
 ```
 
 ## 🔄 WebSocket Events
 
 ### Real-time Monitoring
 
-Connect to `ws://localhost:8095/ws` for real-time updates.
+Connect to `ws://localhost:8095/api/monitoring/ws` for real-time updates.
 
 #### Events
 
@@ -412,5 +412,5 @@ Connect to `ws://localhost:8095/ws` for real-time updates.
 |----------|-------|--------|
 | `/query` | 100 requests | 1 minute |
 | `/api/models` | 50 requests | 1 minute |
-| `/api/performance` | 200 requests | 1 minute |
-| `/api/logs` | 30 requests | 1 minute |
+| `/api/monitoring/performance` | 200 requests | 1 minute |
+| `/api/monitoring/logs` | 30 requests | 1 minute |

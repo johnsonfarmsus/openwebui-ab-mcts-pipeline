@@ -7,8 +7,8 @@
 The system consists of three main layers:
 
 1. **Presentation Layer**: Open WebUI chat interface with model selection
-2. **Processing Layer**: AB-MCTS and Multi-Model pipelines
-3. **Management Layer**: Backend API and monitoring dashboard
+2. **Processing Layer**: AB‑MCTS and Multi‑Model services (FastAPI)
+3. **Management Layer**: Backend API (management, monitoring, runs) and static dashboard
 
 ### Component Details
 
@@ -17,32 +17,24 @@ The system consists of three main layers:
 **Purpose**: Provide native chat interface with seamless model selection
 
 **Components**:
-- **Pipeline System**: Custom pipelines for AB-MCTS and Multi-Model
-- **Model Selection**: User can choose between different reasoning approaches
-- **Web Search**: Integrated search capabilities for factual information
+- **Model Integration** (`backend/model_integration.py`, port 8098): OpenAI‑compatible models `ab-mcts` and `multi-model` exposed via `/v1/models` and `/v1/chat/completions`, with streaming and keep‑alive for long‑running queries.
+- **Tools Integration** (`backend/openwebui_integration.py`, port 8097): OpenAPI endpoints to call AB‑MCTS and Multi‑Model directly as tools; includes optional science tools (RDKit Lipinski/PAINS, Materials Project lookup).
+- **MCP Server** (`backend/mcp_server.py`, port 8096): Exposes the above tools via Model Context Protocol for Open WebUI Tools panel.
 
-**Implementation**:
-```python
-# Pipeline structure
-class ABMCTSPipeline:
-    def __init__(self):
-        self.treequest = TreeQuestABMCTS()
-        self.anti_hallucination = AntiHallucinationSystem()
-    
-    def process(self, query, context):
-        return self.treequest.search(query, context)
-```
+**Notes**:
+- Open WebUI can connect to `model-integration` as a Direct Connection (OpenAI API) or discover tools via MCP/HTTP.
+- The legacy “pipeline system” is not used in this implementation; services run as dedicated FastAPI apps.
 
-#### 2. AB-MCTS Pipeline
+#### 2. AB‑MCTS Service
 
-**Purpose**: Implement Sakana AI's AB-MCTS algorithm for advanced reasoning
+**Purpose**: Implement Sakana AI's AB‑MCTS algorithm (TreeQuest) for advanced reasoning
 
 **Key Features**:
 - **Two-Dimensional Search**: Width (new solutions) and Depth (refinements)
-- **Thompson Sampling**: Adaptive branching decisions
-- **Multi-Model Collaboration**: Dynamic model selection
-- **Anti-Hallucination**: Prevents fabricated information
-- **Quality Scoring**: Evaluates solution quality
+- **TreeQuest ABMCTSA**: Iterative width/depth expansion with model‑specific generation
+- **Width/Depth Prompts**: Structured prompts for new solutions vs. refinements
+- **Quality Scoring**: Length/structure/relevance/confidence composite
+- **Iteration Log**: Optional per‑iteration snapshots for visualization
 
 **Algorithm Flow**:
 ```
@@ -55,77 +47,76 @@ class ABMCTSPipeline:
 3. Return best solution
 ```
 
-**Implementation**:
-```python
-class TreeQuestABMCTS:
-    def __init__(self):
-        self.algo = tq.ABMCTSA()
-        self.models = ["deepseek-r1:1.5b", "gemma3:1b", "llama3.2:1b"]
-    
-    def search(self, query, iterations=20, max_depth=5):
-        # TreeQuest implementation
-        pass
-```
+Implementation: `backend/services/proper_treequest_ab_mcts_service.py` (port 8094)
 
-#### 3. Multi-Model Pipeline
+#### 3. Multi‑Model Service
 
-**Purpose**: Simple multi-model collaboration for fast responses
+**Purpose**: Model‑aware parallel collaboration and synthesis for fast, comprehensive responses
 
 **Key Features**:
-- **Direct Model Calls**: Parallel model execution
-- **Response Synthesis**: Combine multiple model outputs
-- **Fast Processing**: Minimal overhead
-- **Model Voting**: Consensus-based decision making
+- **Model Discovery**: Detect available Ollama models dynamically
+- **Model‑Specific Prompting**: Tailored prompts per model strengths
+- **Quality Scoring**: Relevance/structure/length assessment
+- **Synthesis**: Uses best model to synthesize combined answer (fallback to weighted merge)
 
-**Implementation**:
-```python
-class MultiModelPipeline:
-    def __init__(self):
-        self.models = ["deepseek-r1:1.5b", "gemma3:1b", "llama3.2:1b"]
-    
-    def process(self, query):
-        responses = []
-        for model in self.models:
-            response = self.call_model(model, query)
-            responses.append(response)
-        return self.synthesize(responses)
-```
+Implementation: `backend/services/proper_multi_model_service.py` (port 8090)
 
-#### 4. Backend Management
+#### 4. Backend Management API
 
 **Purpose**: Centralized management and monitoring
 
 **Components**:
-- **Model Manager**: Configure and manage models
-- **Performance Monitor**: Real-time analytics
-- **Configuration API**: Dynamic parameter adjustment
-- **Research Tools**: Analysis and debugging
+- **Pipelines Router**: `/api/pipelines` proxies to AB‑MCTS and Multi‑Model services
+- **Models Router**: `/api/models/*` model CRUD/testing/performance/A/B tests
+- **Config Router**: `/api/config/*` dynamic configs, backup/restore
+- **Monitoring Router**: `/api/monitoring/*` metrics, logs, health, WebSocket `/api/monitoring/ws`
+- **Runs API**: `/api/runs/*` list/get run logs (via `ExperimentLogger`)
 
-**API Endpoints**:
+**Key Endpoints** (selected):
 ```
-GET  /api/models              # List available models
-POST /api/models              # Add new model
-PUT  /api/models/{id}         # Update model config
-GET  /api/performance         # Performance metrics
-GET  /api/logs               # System logs
-POST /api/ab-test            # A/B testing
+GET  /api/pipelines/status
+POST /api/pipelines/ab-mcts/query
+POST /api/pipelines/multi-model/query
+
+GET  /api/models/
+GET  /api/models/{model_id}
+POST /api/models/                     # create
+PUT  /api/models/{model_id}           # update
+POST /api/models/{model_id}/test
+GET  /api/models/{model_id}/performance
+POST /api/models/ab-test
+GET  /api/models/ab-test/{test_id}/results
+
+GET  /api/config/
+PUT  /api/config/{key}
+GET  /api/config/health
+
+GET  /api/monitoring/performance
+GET  /api/monitoring/logs
+GET  /api/monitoring/metrics
+GET  /api/monitoring/health
+WS   /api/monitoring/ws
+
+GET  /api/runs
+GET  /api/runs/{run_id}
+GET  /api/runs/{run_id}/events
 ```
 
 ## 🔄 Data Flow
 
-### AB-MCTS Flow
+### AB‑MCTS Flow
 ```
-User Query → Open WebUI → AB-MCTS Pipeline → TreeQuest → Model Calls → Quality Scoring → Best Solution → Response
+User → Open WebUI (model: ab-mcts) → Model Integration → AB‑MCTS Service (TreeQuest) → Ollama Models → Best Solution → Streamed back
 ```
 
-### Multi-Model Flow
+### Multi‑Model Flow
 ```
-User Query → Open WebUI → Multi-Model Pipeline → Parallel Model Calls → Synthesis → Response
+User → Open WebUI (model: multi-model) → Model Integration → Multi‑Model Service → Parallel Ollama Calls → Synthesis → Streamed back
 ```
 
 ### Management Flow
 ```
-Admin Dashboard → Backend API → Pipeline Configuration → Model Updates → Real-time Monitoring
+Admin (dashboard/http) → Backend API → Pipelines/Models/Config → Runs & Monitoring (WebSocket)
 ```
 
 ## 🗄️ Data Models
@@ -185,12 +176,12 @@ services:
   ab-mcts-service:
     build: .
     ports: ["8094:8094"]
-    command: ["python", "treequest_ab_mcts_service.py"]
+    command: ["python", "backend/services/proper_treequest_ab_mcts_service.py"]
   
   multi-model-service:
     build: .
     ports: ["8090:8090"]
-    command: ["python", "ab_mcts_service.py"]
+    command: ["python", "backend/services/proper_multi_model_service.py"]
   
   backend-api:
     build: .
@@ -207,10 +198,9 @@ services:
 - **System Health**: API response times, error rates
 
 ### Real-time Dashboard
-- **Search Tree Visualization**: Live view of AB-MCTS tree
-- **Performance Charts**: Response times and success rates
-- **Model Comparison**: A/B testing results
-- **Error Monitoring**: Real-time error tracking
+- **Runs**: View past runs and event streams (via `ExperimentLogger`)
+- **Performance**: Response times, success rates (monitoring endpoints)
+- **Health**: Service statuses and periodic updates (WebSocket)
 
 ## 🔒 Security Considerations
 
@@ -220,9 +210,7 @@ services:
 - **Content Filtering**: Detect and flag potential hallucinations
 
 ### API Security
-- **Authentication**: JWT tokens for API access
-- **Rate Limiting**: Prevent abuse of expensive operations
-- **Input Validation**: Sanitize user inputs
+- Authentication/authorization and rate limiting are planned; current code does not fully enforce them. Input validation is handled at Pydantic model boundaries.
 
 ## 🚀 Performance Optimization
 
@@ -232,9 +220,18 @@ services:
 - **Tree Caching**: Persist search trees for similar queries
 
 ### Scaling
-- **Horizontal Scaling**: Multiple pipeline instances
-- **Load Balancing**: Distribute requests across instances
-- **Async Processing**: Non-blocking model calls
+- **Horizontal Scaling**: Multiple instances of services (compose/k8s)
+- **Load Balancing**: Front by gateway/proxy
+- **Async Processing**: Non-blocking httpx/requests
+
+## ⚠️ Current Limitations
+
+- AB‑MCTS queries may take several minutes; streaming keep‑alives are implemented but latency remains high for complex prompts.
+- Responses can be overly verbose; length/structure controls are not enforced universally.
+- Occasional hallucinations remain; fact‑checking/validation is basic.
+- `backend/api/models.py` contains legacy references (`models_db/default_models`) mixed with `ModelManager` usage.
+- Some monitoring endpoints return aggregated/mock data for demo purposes.
+- Security hardening (auth/rate limits) is not fully implemented.
 
 ## 🔄 Deployment Strategy
 

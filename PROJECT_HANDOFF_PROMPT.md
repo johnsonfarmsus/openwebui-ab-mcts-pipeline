@@ -8,15 +8,18 @@ I'm working on integrating Sakana AI's AB-MCTS (Adaptive Branching Monte Carlo T
 
 ### **System Components**
 - **Open WebUI**: Main chat interface with model selection dropdown
-- **Model Integration Service** (Port 8098): Bridges Open WebUI with backend services
-- **AB-MCTS Service** (Port 8094): TreeQuest-based tree search for complex problem solving
-- **Multi-Model Service** (Port 8090): Collaborative AI using multiple models
-- **Backend API** (Port 8095): Management and monitoring endpoints
-- **Management Dashboard** (Port 8081): Web-based configuration interface
+- **Model Integration Service** (Port 8098): OpenAI‑compatible models (ab‑mcts, multi‑model) with streaming/keep‑alive
+- **AB‑MCTS Service** (Port 8094): TreeQuest‑based tree search for complex problem solving
+- **Multi‑Model Service** (Port 8090): Collaborative AI using multiple models with synthesis
+- **Open WebUI Tools Service** (Port 8097): Tool endpoints for AB‑MCTS/Multi‑Model + science tools
+- **MCP Server** (Port 8096): MCP wrapper exposing tools to Open WebUI
+- **Backend API** (Port 8095): Management/monitoring/runs endpoints
+- **Management Dashboard** (Port 8081): Static web dashboard (served via http-server)
 
 ### **Integration Flow**
 ```
-Open WebUI → Model Integration Service → Backend Services → Ollama Models
+Open WebUI (Direct Connection) → Model Integration (8098) → AB‑MCTS / Multi‑Model → Ollama
+Open WebUI (Tools)            → MCP (8096) / Tools (8097) → AB‑MCTS / Multi‑Model → Ollama
 ```
 
 ## ✅ **What's Working**
@@ -39,22 +42,34 @@ Open WebUI → Model Integration Service → Backend Services → Ollama Models
 
 ## 🚧 **Critical Issues to Address**
 
-### **1. Timeout Problems (URGENT)**
-- **Issue**: AB-MCTS service taking >300 seconds to respond
-- **Error**: `httpx.ReadTimeout` in model integration service
-- **Impact**: Users get timeout errors in Open WebUI
-- **Current Timeout**: 300 seconds (still insufficient)
-- **Location**: `backend/model_integration.py` line 136
+### **1. Long‑running AB‑MCTS**
+- **Issue**: Complex prompts can take minutes; model‑integration uses streaming keep‑alives but total latency remains high
+- **Impact**: UX suffers; potential upstream gateway timeouts if misconfigured
+- **Mitigation**: Streaming SSE with periodic pings; consider adaptive iteration limits, early‑exit heuristics
 
-### **2. Performance Issues**
-- **Issue**: AB-MCTS responses are extremely verbose and complex
-- **Impact**: Poor user experience, slow responses
-- **Location**: AB-MCTS service response generation
+### **2. Verbosity & Response Control**
+- **Issue**: AB‑MCTS responses can be overly long
+- **Impact**: TL;DR responses and higher token costs
+- **Mitigation**: Add stricter length/section caps in prompts; post‑processing summarization
 
-### **3. Response Quality**
-- **Issue**: Some responses contain hallucinated information
-- **Impact**: Unreliable outputs
-- **Location**: Model prompting and response synthesis
+### **3. Response Quality / Hallucinations**
+- **Issue**: Occasional hallucinations in both AB‑MCTS and Multi‑Model
+- **Mitigation**: Improve validation/fact‑checks; penalize speculation; integrate web search if feasible
+
+### **4. API Consistency (Models router)**
+- **Issue**: `backend/api/models.py` mixes `ModelManager` with undefined `models_db/default_models`
+- **Impact**: Some endpoints may not function or reflect runtime model state
+- **Suggestion**: Refactor to consistently use `ModelManager` and remove legacy variables
+
+### **5. Monitoring Data**
+- **Issue**: Some monitoring endpoints return mocked/aggregated data
+- **Impact**: Dashboard metrics may not reflect real runtime
+- **Suggestion**: Wire to real metrics or clearly flag as demo
+
+### **6. Security Hardening**
+- **Issue**: Auth/rate‑limits referenced but not enforced broadly
+- **Impact**: Potential exposure in multi‑tenant or public deployments
+- **Suggestion**: Add auth middleware, tokens, and rate‑limiters on critical endpoints
 
 ## 🔧 **Technical Details**
 
@@ -73,41 +88,42 @@ Open WebUI → Model Integration Service → Backend Services → Ollama Models
 - Management Dashboard: `http://localhost:8081/dashboard.html`
 
 ### **Open WebUI Configuration**
-- Settings → Connections → Direct Connections
-- URL: `http://localhost:8098`
-- Auth: Bearer (no API key)
+- Settings → Connections → Direct Connections → add `http://localhost:8098`
+- Or Tools via MCP (8096) / HTTP tools (8097)
 
 ## 🎯 **Immediate Next Steps**
 
-### **Priority 1: Fix Timeout Issues**
-1. Increase timeout to 600+ seconds
-2. Implement streaming responses
-3. Add progress indicators in Open WebUI
-4. Consider reducing AB-MCTS complexity
+### **Priority 1: Long‑running AB‑MCTS**
+1. Keep SSE streaming + pings; ensure Open WebUI timeouts are ≥600s (compose already sets)
+2. Add adaptive iteration/max_depth based on prompt complexity
+3. Expose per‑request overrides via model‑integration config
+4. Consider partial result streaming and early finish on confidence
 
-### **Priority 2: Optimize Performance**
-1. Reduce response verbosity
-2. Implement response caching
-3. Add query complexity detection
-4. Optimize model selection
+### **Priority 2: Performance & Verbosity**
+1. Enforce max length/sections; summarize in post‑processing
+2. Add response caching keyed by normalized prompt
+3. Add query classification (simple vs complex) to set iterations
+4. Optimize per‑model temps/prompts
 
-### **Priority 3: Improve User Experience**
-1. Add loading indicators
-2. Implement response streaming
-3. Better error handling
-4. Response quality improvements
+### **Priority 3: UX & Quality**
+1. Loading indicators are present via streaming; improve progress texts
+2. Add structured `iteration_log` rendering in dashboard
+3. Harden error handling in model‑integration (already returns apologies)
+4. Add fact‑checking hooks (optional web search)
 
 ## 📊 **Current Performance**
-- AB-MCTS: 5-10 minutes for complex queries (too slow)
-- Multi-Model: 1-3 minutes (acceptable)
+- AB‑MCTS: multi‑minute on complex prompts (optimize)
+- Multi‑Model: typically 1–3 minutes
 - Model Discovery: <1 second
 - Health Checks: <1 second
 
 ## 🐛 **Known Issues**
-1. Timeout errors with complex AB-MCTS queries
-2. Extremely verbose AB-MCTS responses
-3. Occasional hallucination in responses
-4. Dashboard status updates may be delayed
+1. Long AB‑MCTS latencies on complex prompts
+2. Verbose responses (AB‑MCTS)
+3. Occasional hallucinations
+4. Monitoring endpoints partially mocked
+5. Inconsistent models API (`backend/api/models.py` legacy refs)
+6. Security hardening not fully implemented
 
 ## 🔍 **Debugging Commands**
 
@@ -188,8 +204,8 @@ openwebui-setup/
 ## 🔗 **Key Resources**
 - Sakana AI AB-MCTS: https://github.com/SakanaAI/ab-mcts-arc2
 - TreeQuest Library: https://github.com/SakanaAI/treequest
+- TreeQuest PyPI: https://pypi.org/project/treequest/
 - Open WebUI: https://github.com/open-webui/open-webui
-- Project Repository: https://github.com/johnsonfarmsus/ab-mcts-arc2
 
 ## 📝 **Notes**
 - All services are containerized with Docker

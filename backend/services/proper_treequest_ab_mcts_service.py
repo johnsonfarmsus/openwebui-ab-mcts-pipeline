@@ -6,6 +6,7 @@ Based on their official implementation and TreeQuest documentation.
 """
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any, Tuple
 import requests
@@ -433,7 +434,7 @@ async def health_check():
 
 @app.get("/metrics")
 async def metrics():
-    return FastAPI.responses.Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.post("/query")
 async def process_query_endpoint(request: QueryRequest):

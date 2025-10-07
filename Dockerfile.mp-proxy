@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY backend/mp_proxy.py backend/mp_proxy.py
+
+# Install mp-api and minimal deps compatible with Python 3.11
+RUN pip install --no-cache-dir \
+    mp-api==0.45.9 \
+    uvicorn==0.24.0 \
+    fastapi==0.104.1
+
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "backend/mp_proxy.py"]
+
+

@@ -7,7 +7,7 @@ that appear in Open WebUI's model dropdown.
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from typing import List, Dict, Any, Optional
 import httpx
 import uvicorn
@@ -17,6 +17,7 @@ import time
 import asyncio
 import os
 import sys
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 # Try absolute import via project root; fallback to module inside backend dir
 try:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,6 +30,33 @@ app = FastAPI(
     title="AB-MCTS & Multi-Model Models",
     version="1.0.0",
     description="Model integration for AB-MCTS and Multi-Model pipelines"
+)
+
+# Prometheus metrics
+MODEL_INTEGRATION_REQUESTS = Counter(
+    "model_integration_requests_total",
+    "Total requests to model integration",
+    ["model"]
+)
+MODEL_INTEGRATION_SUCCESS = Counter(
+    "model_integration_success_total",
+    "Successful model integration responses",
+    ["model"]
+)
+MODEL_INTEGRATION_FAILURES = Counter(
+    "model_integration_failures_total",
+    "Failed model integration responses",
+    ["model"]
+)
+MODEL_INTEGRATION_LATENCY = Histogram(
+    "model_integration_latency_seconds",
+    "Model integration latency in seconds",
+    ["model"],
+    buckets=(1, 5, 10, 30, 60, 120, 300, 600)
+)
+ACTIVE_QUERIES_GAUGE = Gauge(
+    "model_integration_active_queries",
+    "Number of active queries"
 )
 
 # Add CORS middleware
@@ -106,238 +134,6 @@ query_counter = 0
 # Run logger
 experiment_logger = ExperimentLogger()
 
-# ---------------------- Auto-tools helpers ----------------------
-import re
-import json as _json
-
-def _looks_like_smiles(text: str) -> bool:
-    """Heuristic for SMILES strings (relaxed to include simple tokens like CCO)."""
-    if not text:
-        return False
-    tokens = text.strip()
-    if len(tokens) < 2 or len(tokens) > 128:
-        return False
-    # Allowed SMILES character set (roughly)
-    allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789=#()[]+-@/\\")
-    if not all(ch in allowed for ch in tokens):
-        return False
-    # Must contain at least one letter (element symbol)
-    if not any(ch.isalpha() for ch in tokens):
-        return False
-    # Accept simple strings (e.g., CCO) even without ring/bond symbols
-    return True
-
-def _extract_smiles_candidates(message: str) -> List[str]:
-    cands: List[str] = []
-    for part in message.replace("\n", " ").split():
-        if _looks_like_smiles(part):
-            cands.append(part.strip(",.;:()[]{}"))
-    # dedupe, cap
-    seen = set()
-    uniq: List[str] = []
-    for c in cands:
-        if c not in seen:
-            seen.add(c)
-            uniq.append(c)
-    return uniq[:3]
-
-def _extract_material_query(message: str) -> Optional[Dict[str, str]]:
-    msg = message.strip()
-    # mp-id
-    for token in msg.replace("\n", " ").split():
-        tok = token.rstrip(",.;)")
-        if tok.startswith("mp-"):
-            return {"mp_id": tok}
-    # simple formula, short pattern like LiFePO4
-    m = re.search(r"\b(?:[A-Z][a-z]?\d{0,3}){1,4}\b", msg)
-    if m:
-        return {"formula": m.group(0)}
-    return None
-
-# --- Element detection and local knowledge ---
-_ELEMENTS_PATH = "/app/backend/resources/elements_uses.json"
-_PT_PATH = "/app/backend/resources/periodic_table.json"
-try:
-    with open(_ELEMENTS_PATH, "r", encoding="utf-8") as f:
-        _ELEMENTS_MAP: Dict[str, Dict[str, Any]] = _json.load(f)
-except Exception:
-    _ELEMENTS_MAP = {}
-
-try:
-    with open(_PT_PATH, "r", encoding="utf-8") as f:
-        _PT_LIST: List[Dict[str, Any]] = _json.load(f)
-except Exception:
-    _PT_LIST = []
-
-_PT_NAME_TO_SYMBOL: Dict[str, str] = { (e.get("name") or "").lower(): e.get("symbol") for e in _PT_LIST if e.get("symbol") }
-_PT_SYMBOLS: set = set([e.get("symbol") for e in _PT_LIST if e.get("symbol")])
-
-_NAME_TO_SYMBOL: Dict[str, str] = {v.get("name", "").lower(): k for k, v in _ELEMENTS_MAP.items()}
-
-def _detect_element(message: str) -> Optional[Dict[str, Any]]:
-    msg = (message or "").lower()
-    # Try exact word match on element names first (curated uses list)
-    for name, sym in _NAME_TO_SYMBOL.items():
-        # match whole words to avoid substring collisions
-        if re.search(r"\b" + re.escape(name) + r"\b", msg):
-            rec = _ELEMENTS_MAP.get(sym) or {}
-            return {"symbol": sym, "record": rec}
-    # Fallback: periodic table names
-    for name, sym in _PT_NAME_TO_SYMBOL.items():
-        if re.search(r"\b" + re.escape(name) + r"\b", msg):
-            rec = _ELEMENTS_MAP.get(sym) or {"name": name, "symbol": sym}
-            return {"symbol": sym, "record": rec}
-    # Also allow lone symbol (case-sensitive common symbols like Pm)
-    for sym in (_PT_SYMBOLS or set(_ELEMENTS_MAP.keys())):
-        if re.search(r"\b" + re.escape(sym) + r"\b", message):
-            rec = _ELEMENTS_MAP.get(sym) or {}
-            return {"symbol": sym, "record": rec}
-    return None
-
-async def maybe_enrich_with_tools(user_message: str) -> (str, List[Dict[str, Any]]):
-    prefix_parts: List[str] = []
-    events: List[Dict[str, Any]] = []
-    # Materials Project lookup (always attempt if a formula/mp-id is present)
-    try:
-        mat_req = _extract_material_query(user_message)
-        if mat_req:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                r = await client.post(f"{OPENWEBUI_INTEGRATION_URL}/tools/materials/lookup", json=mat_req)
-                if r.status_code == 200:
-                    data = r.json()
-                    if data.get("success"):
-                        # Prefer concise summary rows
-                        d = data.get("data")
-                        # Accept either summary object or typical {data:[...], meta:{...}}
-                        if isinstance(d, dict) and "data" in d and isinstance(d["data"], list):
-                            rows = d["data"][:5]
-                        elif isinstance(d, list):
-                            rows = d[:5]
-                        else:
-                            rows = []
-                        if rows:
-                            lines = []
-                            for row in rows:
-                                rid = row.get("material_id") or row.get("material", "?")
-                                formula = row.get("formula_pretty", "?")
-                                bg = row.get("band_gap")
-                                eah = row.get("e_above_hull") or row.get("energy_above_hull")
-                                fe = row.get("formation_energy_per_atom")
-                                metal = row.get("is_metal")
-                                dens = row.get("density")
-                                spg = row.get("spacegroup_symbol") or (row.get("spacegroup") or {}).get("symbol")
-                                lines.append(
-                                    f"- {rid} {formula} bg={bg} e_hull={eah} fe/atom={fe} metal={metal} density={dens} sg={spg}"
-                                )
-                            preview = "\n".join(lines)
-                        else:
-                            preview = str(d)[:800]
-                        prefix_parts.append(f"Materials Project result for {mat_req}:\n{preview}")
-                        events.append({"type": "tool", "tool": "materials_lookup", "args": mat_req, "ok": True})
-                    else:
-                        events.append({"type": "tool", "tool": "materials_lookup", "args": mat_req, "ok": False, "error": data.get("error")})
-        else:
-            # Explicitly note when no formula/mp-id detected
-            prefix_parts.append("Materials Project: no formula or mp-id detected; skipped.")
-            events.append({"type": "tool", "tool": "materials_lookup", "ok": False, "error": "no_formula_or_mp_id"})
-    except Exception as e:
-        events.append({"type": "tool", "tool": "materials_lookup", "ok": False, "error": str(e)})
-    # If no formula/mp-id found, attempt element detection and augment via MP and local knowledge
-    try:
-        if not any(ev.get("tool") == "materials_lookup" and ev.get("ok") for ev in events):
-            ed = _detect_element(user_message)
-            if ed and ed.get("symbol"):
-                symbol = ed["symbol"]
-                # Local short uses summary
-                rec = ed.get("record") or {}
-                if rec.get("uses"):
-                    prefix_parts.append(f"Element {rec.get('name','')} ({symbol}) uses: {rec['uses']}")
-                    events.append({"type": "tool", "tool": "element_uses", "args": {"symbol": symbol}, "ok": True})
-                # Query Materials Project by elements for short preview
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    r = await client.post(f"{OPENWEBUI_INTEGRATION_URL}/tools/materials/lookup", json={"elements": symbol})
-                    if r.status_code == 200 and r.json().get("success"):
-                        d = r.json().get("data")
-                        rows = []
-                        if isinstance(d, dict) and "data" in d and isinstance(d["data"], list):
-                            rows = d["data"][:3]
-                        elif isinstance(d, list):
-                            rows = d[:3]
-                        if rows:
-                            lines = []
-                            for row in rows:
-                                rid = row.get("material_id") or row.get("material", "?")
-                                formula = row.get("formula_pretty", "?")
-                                bg = row.get("band_gap")
-                                dens = row.get("density")
-                                lines.append(f"- {rid} {formula} bg={bg} density={dens}")
-                            prefix_parts.append(f"Materials Project (elements={symbol}) sample:\n" + "\n".join(lines))
-                            events.append({"type": "tool", "tool": "materials_lookup", "args": {"elements": symbol}, "ok": True})
-    except Exception as e:
-        events.append({"type": "tool", "tool": "element_augment", "ok": False, "error": str(e)})
-
-    # If no SMILES detected, attempt name->structure via PubChem and then RDKit metrics
-    try:
-        if not any(ev.get("tool") == "chem_lipinski_pains" and ev.get("ok") for ev in events):
-            # Use first significant token as candidate name when no formula/SMILES. Keep it simple for now.
-            candidate = user_message.strip().split("\n")[0].strip()
-            if candidate and len(candidate.split()) <= 6:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    r = await client.post(f"{OPENWEBUI_INTEGRATION_URL}/tools/pubchem/lookup", json={"name": candidate})
-                    if r.status_code == 200 and r.json().get("success"):
-                        pd = r.json()
-                        desc = (pd.get("description") or "")[:300]
-                        if desc:
-                            prefix_parts.append(f"PubChem: {desc}")
-                            events.append({"type": "tool", "tool": "pubchem_lookup", "args": {"name": candidate}, "ok": True})
-                        smiles = pd.get("smiles")
-                        if smiles:
-                            rr = await client.post(f"{OPENWEBUI_INTEGRATION_URL}/tools/chem/lipinski_pains", json={"smiles": smiles})
-                            if rr.status_code == 200 and rr.json().get("success"):
-                                lip = rr.json().get("lipinski", {})
-                                parts = []
-                                if isinstance(lip.get('mw'), (int, float)):
-                                    parts.append(f"mw={lip['mw']:.1f}")
-                                for k in ('hbd','hba','logp','rotatable_bonds','tpsa','ring_count','fraction_csp3','heavy_atoms','passes'):
-                                    if lip.get(k) is not None:
-                                        parts.append(f"{k}={lip.get(k)}")
-                                prefix_parts.append(f"RDKit (from name→SMILES): {' '.join(parts)}")
-                                events.append({"type": "tool", "tool": "chem_lipinski_pains", "args": {"smiles": smiles}, "ok": True})
-                            else:
-                                events.append({"type": "tool", "tool": "chem_lipinski_pains", "args": {"smiles": smiles}, "ok": False})
-                    else:
-                        events.append({"type": "tool", "tool": "pubchem_lookup", "args": {"name": candidate}, "ok": False})
-    except Exception as e:
-        events.append({"type": "tool", "tool": "name_to_structure", "ok": False, "error": str(e)})
-
-    # RDKit Lipinski/PAINS (always attempt if any SMILES-like token exists)
-    try:
-        smiles = _extract_smiles_candidates(user_message)
-        synth_smiles = smiles[:]
-        if synth_smiles:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                r = await client.post(f"{OPENWEBUI_INTEGRATION_URL}/tools/chem/lipinski_pains", json={"smiles": synth_smiles[0]})
-                if r.status_code == 200:
-                    data = r.json()
-                    if data.get("success"):
-                        lip = data.get("lipinski", {})
-                        parts = []
-                        if isinstance(lip.get('mw'), (int, float)):
-                            parts.append(f"mw={lip['mw']:.1f}")
-                        for k in ('hbd','hba','logp','rotatable_bonds','tpsa','ring_count','fraction_csp3','heavy_atoms','passes'):
-                            if lip.get(k) is not None:
-                                parts.append(f"{k}={lip.get(k)}")
-                        prefix_parts.append(f"Lipinski/PAINS for {synth_smiles[0]}: {' '.join(parts)}")
-                        events.append({"type": "tool", "tool": "chem_lipinski_pains", "args": {"smiles": synth_smiles[0]}, "ok": True})
-                    else:
-                        events.append({"type": "tool", "tool": "chem_lipinski_pains", "args": {"smiles": synth_smiles[0]}, "ok": False, "error": data.get("error")})
-        else:
-            prefix_parts.append("RDKit: no SMILES detected; skipped.")
-            events.append({"type": "tool", "tool": "chem_lipinski_pains", "ok": False, "error": "no_smiles"})
-    except Exception as e:
-        events.append({"type": "tool", "tool": "chem_lipinski_pains", "ok": False, "error": str(e)})
-    return ("\n\n".join(prefix_parts), events)
-
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -385,7 +181,7 @@ async def root():
 async def health():
     """Health check endpoint."""
     return {
-        "status": "healthy", 
+        "status": "healthy",
         "service": "model-integration",
         "timestamp": time.time(),
         "timeout_settings": {
@@ -398,6 +194,11 @@ async def health():
             "auto_tools_enabled": configuration["auto_tools_enabled"],
         }
     }
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint."""
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.get("/performance")
 async def get_performance_stats():
@@ -481,48 +282,63 @@ async def chat_completions_alt(request: ChatRequest):
 
 async def handle_chat_completions(request: ChatRequest):
     """Handle chat completions logic."""
-    
+
+    # Track metrics
+    MODEL_INTEGRATION_REQUESTS.labels(model=request.model).inc()
+    ACTIVE_QUERIES_GAUGE.inc()
+    start_time = time.time()
+
     # Extract the user's message
     user_message = ""
     for message in request.messages:
         if message.role == "user":
             user_message = message.content
             break
-    
+
     if not user_message:
+        ACTIVE_QUERIES_GAUGE.dec()
         raise HTTPException(status_code=400, detail="No user message found")
     
-    # Optional auto-tools enrichment
+    # Use the user message as-is (enrichment moved to separate tool)
+    enriched_message = user_message
     tool_context = ""
     tool_events: List[Dict[str, Any]] = []
-    if configuration.get("auto_tools_enabled", True):
-        tool_context, tool_events = await maybe_enrich_with_tools(user_message)
-    # Confidence heuristic: attach tool context if we have at least one ok event, else skip
-    has_ok = any(ev.get("ok") for ev in tool_events)
-    enriched_message = (f"[Tool context follows]\n{tool_context}\n\nUser question: {user_message}" if (tool_context and has_ok) else user_message)
 
     # Streaming path (OpenAI-compatible SSE stream)
-    if getattr(request, "stream", False):
+    try:
+        if getattr(request, "stream", False):
+            if request.model == "ab-mcts":
+                return StreamingResponse(
+                    stream_ab_mcts(enriched_message, request, tool_context, tool_events),
+                    media_type="text/event-stream",
+                )
+            elif request.model == "multi-model":
+                return StreamingResponse(
+                    stream_multi_model(enriched_message, request, tool_context, tool_events),
+                    media_type="text/event-stream",
+                )
+            else:
+                ACTIVE_QUERIES_GAUGE.dec()
+                raise HTTPException(status_code=400, detail=f"Unknown model: {request.model}")
+
+        # Non-streaming path
         if request.model == "ab-mcts":
-            return StreamingResponse(
-                stream_ab_mcts(enriched_message, request, tool_context, tool_events),
-                media_type="text/event-stream",
-            )
+            result = await call_ab_mcts(enriched_message, request)
         elif request.model == "multi-model":
-            return StreamingResponse(
-                stream_multi_model(enriched_message, request, tool_context, tool_events),
-                media_type="text/event-stream",
-            )
+            result = await call_multi_model(enriched_message, request)
         else:
+            ACTIVE_QUERIES_GAUGE.dec()
             raise HTTPException(status_code=400, detail=f"Unknown model: {request.model}")
 
-    # Non-streaming path
-    if request.model == "ab-mcts":
-        return await call_ab_mcts(enriched_message, request)
-    elif request.model == "multi-model":
-        return await call_multi_model(enriched_message, request)
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown model: {request.model}")
+        # Record success metrics
+        MODEL_INTEGRATION_SUCCESS.labels(model=request.model).inc()
+        MODEL_INTEGRATION_LATENCY.labels(model=request.model).observe(time.time() - start_time)
+        ACTIVE_QUERIES_GAUGE.dec()
+        return result
+    except Exception as e:
+        MODEL_INTEGRATION_FAILURES.labels(model=request.model).inc()
+        ACTIVE_QUERIES_GAUGE.dec()
+        raise
 
 def build_openai_stream_chunk(content: str, model: str, include_role: bool = False, finish_reason: Optional[str] = None) -> str:
     """Build an OpenAI-compatible streaming chunk line (Server-Sent Event)."""
@@ -918,9 +734,3 @@ async def call_multi_model(user_message: str, request: ChatRequest):
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8098)
-
-# --- Helper for auto-tools ---
-from typing import Optional as _Optional  # satisfy type hints in helper signature
-async def maybe_enrich_with_tools(user_message: str) -> (str, List[Dict[str, Any]]):
-    # this will be overwritten earlier; keeping a minimal placeholder if import order shifts
-    return "", []

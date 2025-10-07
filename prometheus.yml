@@ -18,3 +18,8 @@ scrape_configs:
       - targets: ['multi-model-service:8090']
     metrics_path: /metrics
 
+  - job_name: 'model-integration'
+    static_configs:
+      - targets: ['model-integration:8098']
+    metrics_path: /metrics
+

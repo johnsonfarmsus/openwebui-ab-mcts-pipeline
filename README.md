@@ -1,16 +1,17 @@
-# Open WebUI AB-MCTS & Multi-Model Pipeline Project
+# AB-MCTS & Multi-Model Reasoning Engine for Open WebUI
+
+Advanced reasoning models for Open WebUI using Adaptive Branching Monte Carlo Tree Search (AB-MCTS) and Multi-Model collaboration.
 
 ## 🎯 Project Overview
 
-This project implements **Sakana AI's AB-MCTS (Adaptive Branching Monte Carlo Tree Search)** algorithm and a **Simple Multi-Model** collaboration system, both integrated with Open WebUI for advanced AI reasoning and decision-making.
+This project implements **Sakana AI's AB-MCTS (Adaptive Branching Monte Carlo Tree Search)** algorithm and a **Multi-Model** collaboration system, both integrated with Open WebUI as selectable AI models for advanced reasoning and decision-making.
 
 ### Key Features
 - **AB-MCTS Pipeline**: Advanced tree search with quality scoring and anti-hallucination
-- **Multi-Model Pipeline**: Simple multi-model collaboration for fast responses
-- **Unified Backend**: Management dashboard for both pipelines
-- **Open WebUI Integration**: Native chat interface with model selection
-- **Real-time Monitoring**: Performance analytics and search tree visualization
-- **Scientific Enrichment (optional)**: Auto-enriches prompts/results using RDKit (chemistry) and Materials Project (materials) when relevant, with graceful fallback if unavailable
+- **Multi-Model Pipeline**: Multi-model collaboration for comprehensive answers
+- **OpenAI-Compatible API**: Native integration with Open WebUI's model system
+- **Real-time Monitoring**: Prometheus metrics and Grafana dashboards
+- **Experiment Logging**: SQLite + JSONL run tracking for research and analysis
 
 ## 🏗️ Architecture
 
@@ -18,38 +19,38 @@ This project implements **Sakana AI's AB-MCTS (Adaptive Branching Monte Carlo Tr
 ┌─────────────────────────────────────────────────────────────┐
 │                    Open WebUI Interface                     │
 ├─────────────────────────────────────────────────────────────┤
-│  Chat Model Selection:                                      │
+│  Model Selection:                                           │
 │  ┌─────────────────┐  ┌─────────────────┐                  │
-│  │   AB-MCTS       │  │  Multi-Model    │                  │
-│  │   (Advanced)    │  │  (Simple)       │                  │
+│  │   ab-mcts       │  │  multi-model    │                  │
 │  │                 │  │                 │                  │
-│  │ • Tree Search   │  │ • Direct Collab │                  │
-│  │ • Deep Analysis │  │ • Fast Response │                  │
-│  │ • Best Quality  │  │ • Easy to Use   │                  │
+│  │ • Tree Search   │  │ • Collaboration │                  │
+│  │ • Deep Analysis │  │ • Multi-perspective                │
+│  │ • Best Quality  │  │ • Comprehensive │                  │
 │  └─────────────────┘  └─────────────────┘                  │
 └─────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Backend Management                       │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐                  │
-│  │  AB-MCTS        │  │  Multi-Model    │                  │
-│  │  Pipeline       │  │  Pipeline       │                  │
-│  │                 │  │                 │                  │
-│  │ • TreeQuest     │  │ • Direct API    │                  │
-│  │ • Anti-Halluc.  │  │ • Model Voting  │                  │
-│  │ • Quality Score │  │ • Fast Synthesis│                  │
-│  └─────────────────┘  └─────────────────┘                  │
+│              Model Integration Service (8098)               │
+│                  OpenAI-Compatible API                      │
 └─────────────────────────────────────────────────────────────┘
                                 │
+                ┌───────────────┴───────────────┐
+                ▼                               ▼
+┌─────────────────────────┐    ┌─────────────────────────┐
+│   AB-MCTS Service       │    │  Multi-Model Service    │
+│   (port 8094)           │    │  (port 8090)            │
+│                         │    │                         │
+│ • TreeQuest Algorithm   │    │ • Direct Collaboration  │
+│ • Thompson Sampling     │    │ • Model Voting         │
+│ • Anti-Hallucination    │    │ • Synthesis            │
+└─────────────────────────┘    └─────────────────────────┘
+                │                               │
+                └───────────────┬───────────────┘
                                 ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Model Management                         │
-├─────────────────────────────────────────────────────────────┤
-│  • Model Configuration  • Performance Monitoring           │
-│  • A/B Testing         • Logs & Analytics                  │
-│  • Real-time Stats     • Research Tools                    │
+│                        Ollama                               │
+│              Local LLM Inference Engine                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -58,173 +59,308 @@ This project implements **Sakana AI's AB-MCTS (Adaptive Branching Monte Carlo Tr
 ```
 openwebui-setup/
 ├── README.md                           # This file
-├── ARCHITECTURE.md                     # Detailed architecture docs
-├── API_REFERENCE.md                    # API documentation
-├── DEPLOYMENT.md                       # Deployment instructions
-├── OPENWEBUI_INTEGRATION.md            # Open WebUI integration guide
 ├── docker-compose.yml                  # Docker orchestration
 ├── Dockerfile                          # Container definition
 ├── requirements.txt                    # Python dependencies
-├── backend/                            # Backend and services
-│   ├── api/                            # FastAPI management API
-│   │   ├── main.py                     # API entrypoint (port 8095)
-│   │   ├── pipelines.py                # Proxies to services
-│   │   ├── models.py                   # Model management endpoints
-│   │   ├── config.py                   # Config management endpoints
-│   │   └── monitoring.py               # Monitoring and websockets
-│   ├── models/                         # Data models
-│   │   ├── llm_state.py
-│   │   ├── model_config.py
-│   │   ├── query_models.py
-│   │   └── search_stats.py
-│   ├── services/                       # Business logic services
+├── backend/
+│   ├── api/
+│   │   └── main.py                     # Management API (port 8095)
+│   ├── services/
 │   │   ├── proper_treequest_ab_mcts_service.py  # AB-MCTS (port 8094)
 │   │   ├── proper_multi_model_service.py        # Multi-Model (port 8090)
-│   │   ├── experiment_logger.py                 # SQLite + JSONL runs
-│   │   └── config_manager.py                    # Config management
-│   ├── model_integration.py           # OpenAI-compatible model adapter (8098)
-│   └── openwebui_integration.py       # Tool endpoints for Open WebUI (8097)
-├── interfaces/                         # Static interfaces
-│   ├── dashboard.html                  # Management dashboard (served on 8081)
-│   ├── conversational_ab_mcts_interface.html
-│   ├── real_ab_mcts_interface.html
-│   └── tool_test.html
-├── pipelines/                          # (Optional) pipeline artifacts
-│   └── ab_mcts_pipeline.py
-└── docs/                               # Additional docs
+│   │   ├── experiment_logger.py                 # Run logging
+│   │   └── config_manager.py                    # Configuration
+│   ├── model_integration.py           # OpenAI-compatible model API (8098)
+│   └── openwebui_integration.py       # Tool endpoints (8097)
+├── interfaces/
+│   ├── dashboard.html                  # Management dashboard
+│   └── idiots_guide.html              # Setup guide
+└── logs/                               # Experiment logs and runs
 ```
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 - Docker and Docker Compose
-- Python 3.11+
-- Ollama with models: `deepseek-r1:1.5b`, `gemma3:1b`, `llama3.2:1b`
+- Ollama running locally (port 11434)
+- Recommended models: `llama3.2:latest`, `qwen2.5:latest`, `deepseek-r1:1.5b`
 
 ### Installation
+
+1. **Clone the repository**:
 ```bash
-# Clone the repository
-git clone <repository-url>
+git clone https://github.com/yourusername/openwebui-setup.git
 cd openwebui-setup
-
-# Start services
-docker-compose up -d
-
-# Access interfaces
-# Open WebUI: http://localhost:3000
-# Management Dashboard: http://localhost:8081/dashboard.html
-# Backend API docs: http://localhost:8095/api/docs
 ```
+
+2. **Pull Ollama models**:
+```bash
+ollama pull llama3.2:latest
+ollama pull qwen2.5:latest
+ollama pull deepseek-r1:1.5b
+```
+
+3. **Start all services**:
+```bash
+docker-compose up -d
+```
+
+4. **Verify services**:
+```bash
+docker-compose ps
+```
+
+All services should show "Up" status.
+
+### Connecting to Open WebUI
+
+1. Open Open WebUI at `http://localhost:3000`
+
+2. **Add the model provider**:
+   - Click your profile → **Settings**
+   - Go to **Connections**
+   - Click **+ Add Connection**
+   - Select **OpenAI**
+   - **API Base URL**: `http://model-integration:8098`
+   - **API Key**: `dummy-key` (any value works)
+   - Click **Verify Connection** → Should show "✓ Connected"
+   - Click **Save**
+
+3. **Select a model**:
+   - Start a new chat
+   - Click the model dropdown
+   - Select either:
+     - **ab-mcts** - Advanced tree search reasoning
+     - **multi-model** - Collaborative AI
+
+### Using the Models
+
+#### AB-MCTS
+**Best for:**
+- Complex problem solving
+- Multi-step reasoning
+- Strategic planning
+- Mathematical proofs
+- Decision trees
+
+**Example queries:**
+- "Design a distributed caching system for a social media platform"
+- "Prove that the square root of 2 is irrational"
+- "What's the optimal strategy for a two-player game where..."
+
+**Note:** Responses may take 30-120 seconds due to tree search exploration.
+
+#### Multi-Model
+**Best for:**
+- Comprehensive analysis
+- Multiple perspectives
+- Research questions
+- Balanced viewpoints
+- Faster responses
+
+**Example queries:**
+- "Compare microservices vs monolithic architectures"
+- "Analyze the pros and cons of remote work"
+- "Explain quantum computing to different audiences"
 
 ## 🔧 Services
 
 | Service | Port | Description |
 |---------|------|-------------|
 | Open WebUI | 3000 | Main chat interface |
+| Model Integration | 8098 | OpenAI-compatible model API |
 | AB-MCTS Service | 8094 | TreeQuest AB-MCTS implementation |
-| Multi-Model Service | 8090 | Simple multi-model collaboration |
+| Multi-Model Service | 8090 | Multi-model collaboration |
 | Backend API | 8095 | Management dashboard API |
-| MCP Server | 8096 | Tools bridge for Open WebUI |
-| Open WebUI Integration | 8097 | Tool endpoints (OpenAPI) |
-| Model Integration | 8098 | OpenAI-compatible model adapter |
-| Prometheus | 9090 | Metrics scraping (/metrics on services) |
-| Grafana | 3001 | Dashboards (pre-provisioned Prometheus) |
-| HTTP Server | 8081 | Static dashboard (`/dashboard.html`) |
+| MCP Server | 8096 | Model Context Protocol bridge |
+| Prometheus | 9090 | Metrics collection |
+| Grafana | 3001 | Dashboards and visualization |
+| HTTP Server | 8081 | Static interfaces |
 
-## 📊 Current Status
+## ⚙️ Configuration
 
-### ✅ Completed
-- [x] AB-MCTS implementation using TreeQuest
-- [x] Multi-model collaboration service
-- [x] Open WebUI integration as selectable models
-- [x] Backend management dashboard
-- [x] Anti-hallucination system
-- [x] Docker containerization
-- [x] Dynamic model selection and configuration
-- [x] Real-time monitoring and analytics
+### AB-MCTS Parameters
 
-### 🚧 Current Issues
-- [ ] **Timeouts**: AB‑MCTS can exceed 300–600s on complex prompts; streaming keep‑alives mitigate UI timeouts but latency remains high
-- [ ] **Verbosity**: AB‑MCTS responses can be overly long; needs length/structure controls
-- [ ] **Quality drift**: Occasional hallucinations; add stricter validation/fact‑checking
-- [ ] **Inconsistent model API**: `backend/api/models.py` mixes `ModelManager` with undefined `models_db/default_models`
-- [ ] **Monitoring placeholders**: Some monitoring endpoints return mocked/aggregated data
-- [ ] **Security hardening**: Auth/rate‑limits noted in docs but not fully enforced in code
+Configure via the Backend API:
 
-### 📋 Next Priorities
-- [ ] Fix timeout issues with streaming responses
-- [ ] Optimize AB-MCTS performance and verbosity
-- [ ] Improve response quality and accuracy
-- [ ] Add loading indicators and better UX
-- [ ] Implement response caching
+```bash
+curl -X POST http://localhost:8095/api/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ab_mcts_iterations": 20,
+    "ab_mcts_max_depth": 5
+  }'
+```
 
-## 🧾 Runs & Logging
+**Parameters:**
+- `ab_mcts_iterations`: Number of search iterations (1-100, default: 20)
+  - Higher = better quality, slower response
+  - Recommended: 10-20 for most queries
+- `ab_mcts_max_depth`: Maximum tree depth (1-20, default: 5)
+  - Higher = deeper reasoning, slower response
+  - Recommended: 3-5 for most queries
 
-- Where: `logs/` (shared volume). Structure:
-  - `logs/runs.db` (SQLite index)
-  - `logs/runs/YYYYMMDD/run_<id>.jsonl` (JSONL event stream per run)
-- View in UI: `http://localhost:8081/dashboard.html` → “Runs” card
-- API:
-  - `GET http://localhost:8095/api/runs?limit=50`
-  - `GET http://localhost:8095/api/runs/{run_id}`
-  - `GET http://localhost:8095/api/runs/{run_id}/events?head=200`
-  - `GET http://localhost:8095/api/monitoring/passk?k=50&hours=24` (simple Pass@k rollup)
+### Model Selection
 
-## 📚 Research Guide
+Update which Ollama models each service uses:
 
-See `docs/research/RESEARCH_GUIDE.md` for how to analyze runs, use the evals page, query Pass@k, and interpret Prometheus/Grafana dashboards.
+```bash
+# AB-MCTS models
+curl -X POST http://localhost:8094/models/update \
+  -H "Content-Type: application/json" \
+  -d '{"models": ["llama3.2:latest", "qwen2.5:latest"]}'
 
-## 🧒 Idiot's Guide (Noobs Welcome)
+# Multi-Model models
+curl -X POST http://localhost:8090/models/update \
+  -H "Content-Type: application/json" \
+  -d '{"models": ["llama3.2:latest", "qwen2.5:latest", "deepseek-r1:1.5b"]}'
+```
 
-Open a simple, step-by-step install and connect guide at `http://localhost:8081/idiots_guide.html` once Docker is up. It covers Docker/Ollama prerequisites, `docker compose up -d`, and the Open WebUI UI steps:
-- Admin Settings → External Tools → `http://localhost:8097` → Verify Connection → Save
-- Settings → Connections → `http://localhost:8098` → Verify Connection → Save
-- Settings → External Tools → `http://localhost:8097` → Verify Connection → Save
+## 📊 Monitoring
 
-## 🔬 Science Tools (optional)
+### Prometheus Metrics
 
-Two helper tools are exposed for sanity checks in chemistry and materials:
+Access Prometheus at `http://localhost:9090`
 
-- Chemistry: `chem_lipinski_pains` (RDKit-based)
-  - Endpoint: `POST http://localhost:8097/tools/chem/lipinski_pains`
-  - Body: `{ "smiles": "CCO" }`
-  - RDKit is optional; if not installed in the image, the endpoint returns a clear error.
+**Key metrics:**
+- `model_integration_requests_total` - Total requests by model
+- `model_integration_success_total` - Successful responses
+- `model_integration_failures_total` - Failed responses
+- `model_integration_latency_seconds` - Response time histogram
+- `model_integration_active_queries` - Current active queries
 
-- Materials Project: `materials_project_lookup`
-  - Endpoint: `POST http://localhost:8097/tools/materials/lookup`
-  - Body: `{ "formula": "LiFePO4" }` or `{ "mp_id": "mp-149" }`
-  - Requires `MATERIALS_PROJECT_API_KEY`.
+### Grafana Dashboards
 
-Use these tools via:
-- Open WebUI Tools (connect MCP server at `http://localhost:8096`) → tools appear in the Tools panel, or
-- Direct HTTP requests, or
-- From pipelines/services as sub-calls.
+Access Grafana at `http://localhost:3001` (credentials: `admin/admin`)
 
-## ⚙️ Configuration Notes
+**Pre-configured dashboards:**
+- Request rates and success rates
+- Latency percentiles (p50, p95, p99)
+- Active query monitoring
+- Error rates by type
+- Service health status
 
-- Set `MATERIALS_PROJECT_API_KEY` to enable Materials Project lookups.
-- Logging directory can be controlled with `LOGS_DIR` (defaults to `/app/logs` in containers).
-- Open WebUI model integration: either add `http://localhost:8098` as a Direct Connection (OpenAI‑compatible) or set `OPENAI_API_BASE_URLS` to include `http://model-integration:8098` in Docker.
-- Prometheus scrapes: backend‑api (8095)/metrics, ab‑mcts-service (8094)/metrics, multi-model-service (8090)/metrics. Grafana is preconfigured with a starter dashboard.
+### Experiment Logs
 
-## 🤝 Contributing
+All runs are logged to `/app/logs`:
+- `logs/runs.db` - SQLite index
+- `logs/runs/YYYYMMDD/run_<id>.jsonl` - Event stream per run
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+**View logs:**
+- Dashboard: `http://localhost:8081/dashboard.html` → "Runs" tab
+- API: `GET http://localhost:8095/api/runs?limit=50`
+- Details: `GET http://localhost:8095/api/runs/{run_id}`
+
+## 🐛 Troubleshooting
+
+### Models not appearing in Open WebUI
+
+**Check model integration service:**
+```bash
+curl http://localhost:8098/health
+curl http://localhost:8098/v1/models
+```
+
+**Verify Open WebUI connection:**
+- Settings → Connections → Verify the connection shows "✓ Connected"
+- Try refreshing the page
+- Check browser console for errors
+
+### Slow responses
+
+**Reduce AB-MCTS iterations:**
+```bash
+curl -X POST http://localhost:8095/api/config \
+  -d '{"ab_mcts_iterations": 10, "ab_mcts_max_depth": 3}'
+```
+
+**Use faster Ollama models:**
+```bash
+ollama pull llama3.2:1b  # Smaller, faster model
+```
+
+**Check Ollama performance:**
+```bash
+time curl http://localhost:11434/api/generate \
+  -d '{"model":"llama3.2:latest","prompt":"test","stream":false}'
+```
+
+### Service connection errors
+
+**Check all services are running:**
+```bash
+docker-compose ps
+```
+
+**View service logs:**
+```bash
+docker logs model-integration
+docker logs ab-mcts-service
+docker logs multi-model-service
+```
+
+**Restart services:**
+```bash
+docker-compose restart
+```
+
+## 🚧 Known Issues
+
+- **Timeouts**: AB-MCTS can take 30-120s on complex queries (streaming keeps UI responsive)
+- **Verbosity**: AB-MCTS responses can be lengthy (working on length controls)
+- **Quality drift**: Occasional hallucinations (add stricter validation)
+
+## 📚 API Reference
+
+### Model Integration Service (port 8098)
+
+**OpenAI-Compatible Endpoints:**
+- `GET /v1/models` - List available models
+- `POST /v1/chat/completions` - Chat completions
+
+**Management Endpoints:**
+- `GET /health` - Health check
+- `GET /metrics` - Prometheus metrics
+- `GET /performance` - Performance statistics
+- `GET /config` - Current configuration
+- `POST /config` - Update configuration
+
+### AB-MCTS Service (port 8094)
+
+- `POST /query` - Run AB-MCTS query
+  - Body: `{"query": "...", "iterations": 20, "max_depth": 5}`
+- `GET /models` - List available models
+- `POST /models/update` - Update model selection
+- `GET /health` - Health check
+- `GET /metrics` - Prometheus metrics
+
+### Multi-Model Service (port 8090)
+
+- `POST /query` - Run multi-model query
+  - Body: `{"query": "..."}`
+- `GET /models` - List available models
+- `POST /models/update` - Update model selection
+- `GET /health` - Health check
+- `GET /metrics` - Prometheus metrics
+
+## 🤝 Related Projects
+
+- [Scientific Data Enrichment Tool](https://github.com/yourusername/scientific-enrichment-tool) - Chemistry and materials science enrichment for Open WebUI (separate tool)
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License - See LICENSE file for details.
 
 ## 🙏 Acknowledgments
 
-- [Sakana AI](https://sakana.ai/) for the AB‑MCTS research and TreeQuest library
-- [Sakana AI AB‑MCTS‑ARC2](https://github.com/SakanaAI/ab-mcts-arc2) for the official implementation reference
+- [Sakana AI](https://sakana.ai/) for AB-MCTS research and TreeQuest
 - [Open WebUI](https://github.com/open-webui/open-webui) for the chat interface
-- [Ollama](https://ollama.ai/) for local model serving
-- [Prometheus](https://prometheus.io/) and [Grafana](https://grafana.com/) for observability tooling
-- [RDKit](https://www.rdkit.org/) (optional) for chemistry descriptors; `rdkit-pypi` wheels used when installed
-- [Materials Project](https://materialsproject.org/) (optional) for materials data via their API
+- [Ollama](https://ollama.ai/) for local LLM inference
+- [Prometheus](https://prometheus.io/) & [Grafana](https://grafana.com/) for observability
+
+## 📖 Additional Documentation
+
+- `ARCHITECTURE.md` - Detailed architecture and design
+- `API_REFERENCE.md` - Complete API documentation
+- `DEPLOYMENT.md` - Production deployment guide
+- `docs/research/RESEARCH_GUIDE.md` - Research and analysis guide

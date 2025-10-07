@@ -9,6 +9,7 @@ Implements sophisticated multi-model collaboration with:
 """
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any
 import requests
@@ -443,7 +444,7 @@ async def health_check():
 
 @app.get("/metrics")
 async def metrics():
-    return FastAPI.responses.Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.post("/query")
 async def process_query_endpoint(request: QueryRequest):

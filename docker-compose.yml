@@ -121,26 +121,7 @@ services:
       - "host.docker.internal:host-gateway"
     command: ["python", "backend/mcp_server.py"]
 
-  # Open WebUI Integration Service
-  openwebui-integration:
-    build: .
-    container_name: openwebui-integration
-    ports:
-      - "8097:8097"
-    environment:
-      - AB_MCTS_SERVICE_URL=http://ab-mcts-service:8094
-      - MULTI_MODEL_SERVICE_URL=http://multi-model-service:8090
-      - MATERIALS_PROJECT_API_KEY=${MATERIALS_PROJECT_API_KEY}
-    networks:
-      - openwebui-net
-    restart: always
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    command: ["python", "backend/openwebui_integration.py"]
-    volumes:
-      - logs:/app/logs
-
-  # Model Integration Service
+  # Model Integration Service (AB-MCTS and Multi-Model as OpenAI-compatible models)
   model-integration:
     build: .
     container_name: model-integration
@@ -149,7 +130,6 @@ services:
     environment:
       - AB_MCTS_SERVICE_URL=http://ab-mcts-service:8094
       - MULTI_MODEL_SERVICE_URL=http://multi-model-service:8090
-      - MATERIALS_PROJECT_API_KEY=${MATERIALS_PROJECT_API_KEY}
     networks:
       - openwebui-net
     restart: always

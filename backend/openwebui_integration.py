@@ -1,7 +1,7 @@
 """
 Open WebUI Integration Service
 
-This service provides OpenAPI-compatible endpoints specifically designed for Open WebUI integration.
+This service provides OpenAPI-compatible endpoints for AB-MCTS and Multi-Model integration.
 """
 
 from fastapi import FastAPI, HTTPException
@@ -10,7 +10,6 @@ from typing import List, Dict, Any, Optional
 import httpx
 import uvicorn
 from pydantic import BaseModel
-import os
 
 app = FastAPI(
     title="AB-MCTS & Multi-Model Tools",
@@ -30,9 +29,6 @@ app.add_middleware(
 # Service URLs
 AB_MCTS_SERVICE_URL = "http://ab-mcts-service:8094"
 MULTI_MODEL_SERVICE_URL = "http://multi-model-service:8090"
-
-# Optional external tools configuration
-MATERIALS_PROJECT_API_KEY = os.getenv("MATERIALS_PROJECT_API_KEY", "")
 
 class QueryRequest(BaseModel):
     query: str
@@ -62,7 +58,7 @@ async def health():
 async def ab_mcts_query(request: QueryRequest):
     """
     Run AB-MCTS (Adaptive Branching Monte Carlo Tree Search) query.
-    
+
     This tool uses advanced tree search algorithms to solve complex problems
     by exploring multiple solution paths and finding the best answer.
     """
@@ -75,7 +71,7 @@ async def ab_mcts_query(request: QueryRequest):
             }
             if request.models:
                 payload["models"] = request.models
-                
+
             response = await client.post(
                 f"{AB_MCTS_SERVICE_URL}/query",
                 json=payload
@@ -115,7 +111,7 @@ async def update_ab_mcts_models(request: ModelUpdateRequest):
 async def multi_model_query(request: MultiModelRequest):
     """
     Run Multi-Model collaboration query.
-    
+
     This tool uses multiple AI models working together to provide
     comprehensive and well-rounded answers to complex questions.
     """
@@ -124,7 +120,7 @@ async def multi_model_query(request: MultiModelRequest):
             payload = {"query": request.query}
             if request.models:
                 payload["models"] = request.models
-                
+
             response = await client.post(
                 f"{MULTI_MODEL_SERVICE_URL}/query",
                 json=payload
@@ -177,182 +173,8 @@ async def list_tools():
         "tools": [
             {"name": "ab_mcts", "description": "Advanced tree search for complex problem solving", "endpoint": "/tools/ab_mcts"},
             {"name": "multi_model", "description": "Collaborative AI for comprehensive answers", "endpoint": "/tools/multi_model"},
-            {"name": "chem_lipinski_pains", "description": "Check SMILES for Lipinski rule-of-five and PAINS alerts", "endpoint": "/tools/chem/lipinski_pains"},
-            {"name": "materials_project_lookup", "description": "Lookup materials by formula, mp-id, or elements using the Materials Project API", "endpoint": "/tools/materials/lookup"},
-            {"name": "pubchem_lookup", "description": "Resolve chemical name via PubChem and return short description/properties", "endpoint": "/tools/pubchem/lookup"},
         ]
     }
-
-# --- Chemistry tools (RDKit-based, graceful fallback) ---
-try:
-    from rdkit import Chem
-    from rdkit.Chem import Descriptors, Lipinski
-    from rdkit.Chem import rdMolDescriptors
-    RDKit_AVAILABLE = True
-except Exception:
-    RDKit_AVAILABLE = False
-
-@app.post("/tools/chem/lipinski_pains")
-async def chem_lipinski_pains(payload: Dict[str, Any]):
-    """Evaluate SMILES for Lipinski rules and (placeholder) PAINS flags.
-
-    Request: {"smiles": "CCO..."}
-    """
-    smiles = payload.get("smiles", "")
-    if not smiles:
-        raise HTTPException(status_code=400, detail="Missing 'smiles'")
-    if not RDKit_AVAILABLE:
-        return {"success": False, "error": "RDKit not installed in this image"}
-    try:
-        mol = Chem.MolFromSmiles(smiles)
-        if mol is None:
-            return {"success": False, "error": "Invalid SMILES"}
-        mw = Descriptors.MolWt(mol)
-        hbd = Lipinski.NumHDonors(mol)
-        hba = Lipinski.NumHAcceptors(mol)
-        logp = Descriptors.MolLogP(mol)
-        rot_bonds = Lipinski.NumRotatableBonds(mol)
-        tpsa = Descriptors.TPSA(mol)
-        rings = rdMolDescriptors.CalcNumRings(mol)
-        frac_csp3 = float(rdMolDescriptors.CalcFractionCSP3(mol))
-        heavy_atoms = mol.GetNumHeavyAtoms()
-        formula = rdMolDescriptors.CalcMolFormula(mol)
-        lipinski_pass = (
-            (mw <= 500)
-            and (hbd <= 5)
-            and (hba <= 10)
-            and (logp <= 5)
-        )
-        # Placeholder PAINS: a real implementation would use substructure SMARTS
-        pains_alerts: List[str] = []
-        return {
-            "success": True,
-            "lipinski": {
-                "mw": mw,
-                "hbd": hbd,
-                "hba": hba,
-                "logp": logp,
-                "rotatable_bonds": rot_bonds,
-                "tpsa": tpsa,
-                "ring_count": rings,
-                "fraction_csp3": frac_csp3,
-                "heavy_atoms": heavy_atoms,
-                "formula": formula,
-                "passes": lipinski_pass,
-            },
-            "pains_alerts": pains_alerts,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Chem tool error: {str(e)}")
-
-# --- Materials Project lookup ---
-@app.post("/tools/materials/lookup")
-async def materials_lookup(payload: Dict[str, Any]):
-    """Lookup by formula, mp-id, or elements via Materials Project v2 API (if key set).
-
-    Request: {"formula": "LiFePO4"} or {"mp_id": "mp-149"} or {"elements": "Pm"} or {"elements": ["Li","Fe","O"]}
-    """
-    if not MATERIALS_PROJECT_API_KEY:
-        return {"success": False, "error": "MATERIALS_PROJECT_API_KEY not set"}
-    base = "https://api.materialsproject.org"
-    headers = {"accept": "application/json", "X-API-KEY": MATERIALS_PROJECT_API_KEY}
-    try:
-        async with httpx.AsyncClient(timeout=20.0, headers=headers) as client:
-            # Rich set of commonly used materials fields
-            fields = (
-                "material_id,formula_pretty,energy_above_hull,e_above_hull,formation_energy_per_atom,"
-                "band_gap,is_metal,density,nelements,spacegroup,spacegroup_symbol,"
-                "volume,elements,elasticity,oxidation_states,structure"
-            )
-            if payload.get("mp_id"):
-                mp_id = payload["mp_id"]
-                # Use summary fields for richer content
-                r = await client.get(f"{base}/materials/summary/{mp_id}?fields={fields}")
-                if r.status_code == 404:
-                    # Fallback to generic materials endpoint
-                    r = await client.get(f"{base}/materials/{mp_id}")
-                r.raise_for_status()
-                return {"success": True, "data": r.json()}
-            elif payload.get("formula"):
-                formula = payload["formula"]
-                r = await client.get(f"{base}/materials/summary/?formula={formula}&fields={fields}")
-                r.raise_for_status()
-                return {"success": True, "data": r.json()}
-            elif payload.get("elements"):
-                els = payload["elements"]
-                if isinstance(els, list):
-                    els_param = "-".join(els)
-                else:
-                    els_param = str(els)
-                # Query materials containing these elements. We will trim client-side.
-                r = await client.get(f"{base}/materials/summary/?elements={els_param}&fields={fields}")
-                r.raise_for_status()
-                return {"success": True, "data": r.json()}
-            else:
-                raise HTTPException(status_code=400, detail="Provide 'formula' or 'mp_id'")
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"Materials Project HTTP error: {str(e)}")
-
-# --- PubChem lookup (no API key required) ---
-@app.post("/tools/pubchem/lookup")
-async def pubchem_lookup(payload: Dict[str, Any]):
-    """Resolve a chemical name via PubChem and return a concise summary.
-
-    Request: {"name": "promethium"}
-    """
-    name = (payload or {}).get("name", "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Missing 'name'")
-    base = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            # Resolve to a CID
-            r = await client.get(f"{base}/compound/name/{httpx.utils.quote(name, safe='')}/cids/JSON")
-            r.raise_for_status()
-            cids = r.json().get("IdentifierList", {}).get("CID", [])
-            if not cids:
-                return {"success": False, "error": "not_found"}
-            cid = cids[0]
-            # Get description (PUG View) and a few properties
-            desc_r = await client.get(f"{base}/view/data/compound/{cid}/JSON")
-            props_r = await client.get(f"{base}/compound/cid/{cid}/property/MolecularFormula,MolecularWeight,IsotopeAtomCount,InChIKey,CanonicalSMILES/JSON")
-            desc = ""
-            try:
-                view = desc_r.json()
-                # Extract first non-empty description string we can find
-                records = view.get("Record", {}).get("Section", [])
-                # Heuristic scan
-                def find_text(sections):
-                    for sec in sections or []:
-                        if "Information" in sec:
-                            for info in sec["Information"]:
-                                val = (info.get("Value", {}) or {}).get("StringWithMarkup", [])
-                                if val:
-                                    txt = " ".join([v.get("String", "") for v in val]).strip()
-                                    if txt:
-                                        return txt
-                        inner = sec.get("Section")
-                        txt = find_text(inner)
-                        if txt:
-                            return txt
-                    return ""
-                desc = find_text(records) or ""
-            except Exception:
-                desc = ""
-            props = {}
-            smiles = None
-            try:
-                props_data = props_r.json().get("PropertyTable", {}).get("Properties", [{}])[0]
-                props = {k: props_data.get(k) for k in ("MolecularFormula", "MolecularWeight", "InChIKey", "IsotopeAtomCount", "CanonicalSMILES")}
-                smiles = props.get("CanonicalSMILES")
-            except Exception:
-                props = {}
-            # Trim description for prompt safety
-            if desc and len(desc) > 600:
-                desc = desc[:600] + "…"
-            return {"success": True, "cid": cid, "description": desc, "properties": props, "smiles": smiles}
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"PubChem HTTP error: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8097)

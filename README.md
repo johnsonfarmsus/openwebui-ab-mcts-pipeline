@@ -345,7 +345,7 @@ docker-compose restart
 
 ## 🤝 Related Projects
 
-- [Scientific Data Enrichment Tool](https://github.com/yourusername/scientific-enrichment-tool) - Chemistry and materials science enrichment for Open WebUI (separate tool)
+- [Scientific Data Enrichment Tool](https://github.com/johnsonfarmsus/scientific-enrichment-tool) - Chemistry and materials science enrichment for Open WebUI (separate tool)
 
 ## 📄 License
 

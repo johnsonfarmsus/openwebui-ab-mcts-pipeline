@@ -130,32 +130,57 @@ class ProperTreeQuestABMCTSService:
             return f"Error: {str(e)}"
     
     def evaluate_solution_quality(self, solution: str, query: str) -> float:
-        """Evaluate solution quality using Sakana AI's approach."""
+        """Evaluate solution quality with better scoring heuristics."""
         if not solution or "Error:" in solution:
             return 0.0
-        
-        # Length-based quality
-        length_score = min(len(solution) / 1000, 1.0)
-        
-        # Structure quality
+
+        # Length quality - prefer moderate length, penalize both too short and too long
+        # Optimal range: 100-500 characters for most queries
+        length = len(solution)
+        if length < 50:
+            length_score = length / 100  # Too short
+        elif length < 500:
+            length_score = 1.0  # Good length
+        elif length < 1500:
+            length_score = 1.0 - ((length - 500) / 2000)  # Getting too long
+        else:
+            length_score = 0.3  # Way too long, likely rambling
+
+        # Structure quality - prefer organized responses
         structure_indicators = ["1.", "2.", "3.", "First", "Second", "Third", "Therefore", "However", "In conclusion"]
-        structure_score = sum(1 for indicator in structure_indicators if indicator in solution) / len(structure_indicators)
-        
-        # Relevance quality
+        structure_score = min(sum(1 for indicator in structure_indicators if indicator in solution) / 5, 1.0)
+
+        # Relevance quality - must contain query terms
         query_terms = set(query.lower().split())
         solution_terms = set(solution.lower().split())
         relevance_score = len(query_terms.intersection(solution_terms)) / max(len(query_terms), 1)
-        
+
         # Confidence quality
-        confidence_indicators = ["definitely", "certainly", "clearly", "specifically"]
-        uncertainty_indicators = ["maybe", "perhaps", "might", "unclear", "not sure"]
-        
-        confidence_boost = sum(1 for indicator in confidence_indicators if indicator in solution.lower()) * 0.1
-        confidence_penalty = sum(1 for indicator in uncertainty_indicators if indicator in solution.lower()) * 0.1
-        
-        # Calculate overall quality
-        quality = (length_score * 0.3 + structure_score * 0.3 + relevance_score * 0.4) + confidence_boost - confidence_penalty
-        
+        confidence_indicators = ["definitely", "certainly", "clearly", "specifically", "exactly"]
+        uncertainty_indicators = ["maybe", "perhaps", "might", "unclear", "not sure", "unknown"]
+
+        confidence_boost = min(sum(1 for indicator in confidence_indicators if indicator in solution.lower()) * 0.05, 0.15)
+        confidence_penalty = sum(1 for indicator in uncertainty_indicators if indicator in solution.lower()) * 0.15
+
+        # Repetition penalty - detect repetitive text
+        words = solution.lower().split()
+        if len(words) > 20:
+            unique_words = len(set(words))
+            repetition_ratio = unique_words / len(words)
+            repetition_penalty = 0.0 if repetition_ratio > 0.7 else (0.7 - repetition_ratio) * 0.5
+        else:
+            repetition_penalty = 0.0
+
+        # Calculate overall quality - emphasize relevance and conciseness
+        quality = (
+            length_score * 0.25 +
+            structure_score * 0.15 +
+            relevance_score * 0.50 +
+            confidence_boost -
+            confidence_penalty -
+            repetition_penalty
+        )
+
         return max(0.0, min(1.0, quality))
     
     def generate_width_prompt(self, query: str) -> str:

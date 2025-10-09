@@ -7,11 +7,16 @@ Advanced reasoning models for Open WebUI using Adaptive Branching Monte Carlo Tr
 This project implements **Sakana AI's AB-MCTS (Adaptive Branching Monte Carlo Tree Search)** algorithm and a **Multi-Model** collaboration system, both integrated with Open WebUI as selectable AI models for advanced reasoning and decision-making.
 
 ### Key Features
-- **AB-MCTS Pipeline**: Advanced tree search with quality scoring and anti-hallucination
+- **AB-MCTS Pipeline**: Advanced tree search with LLM-as-judge quality evaluation
+  - Multi-criterion evaluation (accuracy, completeness, clarity, relevance)
+  - Configurable criterion weights
+  - Support for 1-2 judge models for consensus
+  - Real-time tree visualization
 - **Multi-Model Pipeline**: Multi-model collaboration for comprehensive answers
 - **OpenAI-Compatible API**: Native integration with Open WebUI's model system
 - **Real-time Monitoring**: Prometheus metrics and Grafana dashboards
 - **Experiment Logging**: SQLite + JSONL run tracking for research and analysis
+- **Interactive Dashboard**: Configure models, judges, and visualize search trees
 
 ## 🏗️ Architecture
 
@@ -179,26 +184,73 @@ All services should show "Up" status.
 
 ## ⚙️ Configuration
 
+### Using the Dashboard (Recommended)
+
+Access the interactive dashboard at `http://localhost:8081/dashboard.html`
+
+**Features:**
+- **Model Selection**: Choose which Ollama models power each service
+- **Judge Configuration**: Select 1-2 LLMs to evaluate solution quality
+- **Criterion Weights**: Adjust importance of accuracy, completeness, clarity, and relevance
+- **Search Parameters**: Configure iterations and max depth
+- **Tree Visualization**: View AB-MCTS search trees (Sakana AI style)
+- **Run History**: Browse past queries and their exploration trees
+
 ### AB-MCTS Parameters
 
-Configure via the Backend API:
+Configure via Dashboard or API:
 
 ```bash
-curl -X POST http://localhost:8095/api/config \
+curl -X POST http://localhost:8094/params/update \
   -H "Content-Type: application/json" \
   -d '{
-    "ab_mcts_iterations": 20,
-    "ab_mcts_max_depth": 5
+    "iterations": 20,
+    "max_depth": 5
   }'
 ```
 
 **Parameters:**
-- `ab_mcts_iterations`: Number of search iterations (1-100, default: 20)
+- `iterations`: Number of search iterations (1-100, default: 20)
   - Higher = better quality, slower response
   - Recommended: 10-20 for most queries
-- `ab_mcts_max_depth`: Maximum tree depth (1-20, default: 5)
+- `max_depth`: Maximum tree depth (1-20, default: 5)
   - Higher = deeper reasoning, slower response
   - Recommended: 3-5 for most queries
+
+### Judge Models (LLM-as-Judge)
+
+AB-MCTS uses LLM judges to evaluate solution quality on 4 criteria:
+
+**Criteria:**
+1. **Accuracy**: Is it factually correct?
+2. **Completeness**: Does it fully answer the question?
+3. **Clarity**: Is it well-explained and understandable?
+4. **Relevance**: Is it on-topic and addresses the query?
+
+**Configuration:**
+```bash
+# Set judge models (1-2 recommended for consensus)
+curl -X POST http://localhost:8094/judges/update \
+  -H "Content-Type: application/json" \
+  -d '{"judge_models": ["qwen3:0.6b"]}'
+
+# Adjust criterion weights (auto-normalizes to 100%)
+curl -X POST http://localhost:8094/weights/update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "weights": {
+      "accuracy": 0.4,
+      "completeness": 0.3,
+      "clarity": 0.2,
+      "relevance": 0.1
+    }
+  }'
+```
+
+**Notes:**
+- Using 2 judges provides consensus and reduces bias
+- Weights persist across restarts
+- All settings are managed in the dashboard UI
 
 ### Model Selection
 
@@ -240,16 +292,34 @@ Access Grafana at `http://localhost:3001` (credentials: `admin/admin`)
 - Error rates by type
 - Service health status
 
-### Experiment Logs
+### Experiment Logs & Tree Visualization
 
-All runs are logged to `/app/logs`:
+All AB-MCTS runs are logged with complete search tree data:
 - `logs/runs.db` - SQLite index
 - `logs/runs/YYYYMMDD/run_<id>.jsonl` - Event stream per run
+- `logs/selected_models_abmcts.json` - Persisted configuration
 
-**View logs:**
-- Dashboard: `http://localhost:8081/dashboard.html` → "Runs" tab
-- API: `GET http://localhost:8095/api/runs?limit=50`
-- Details: `GET http://localhost:8095/api/runs/{run_id}`
+**View in Dashboard:**
+1. Go to `http://localhost:8081/dashboard.html`
+2. Click "Research Explorer" tab
+3. Click any run to view:
+   - Full hierarchical search tree visualization (Sakana AI style)
+   - Per-node quality scores and judge evaluations
+   - Model performance across iterations
+   - Complete response text for each node
+
+**Tree Visualization Features:**
+- D3.js interactive tree graph
+- Color-coded by model and quality
+- Zoom and pan navigation
+- Click nodes to see full details
+- Shows parent-child relationships
+- Identifies best solution path
+
+**API Access:**
+- List runs: `GET http://localhost:8094/runs?limit=50`
+- Run details: `GET http://localhost:8094/runs/{run_id}`
+- Tree data: `GET http://localhost:8094/runs/{run_id}/tree`
 
 ## 🐛 Troubleshooting
 

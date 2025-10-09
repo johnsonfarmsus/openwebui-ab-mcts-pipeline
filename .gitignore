@@ -51,7 +51,11 @@ Thumbs.db
 
 # Logs
 *.log
-logs/
+logs/*.db
+logs/runs/
+logs/selected_models_*.json
+logs/config_*.json
+!logs/.gitkeep
 
 # Temporary files
 *.tmp
@@ -59,8 +63,7 @@ logs/
 temp/
 tmp/
 
-# Database
-*.db
+# Database (but allow logs directory structure)
 *.sqlite
 *.sqlite3
 

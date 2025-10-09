@@ -10,10 +10,10 @@ import uuid
 
 class QueryRequest(BaseModel):
     """Request model for query processing."""
-    
+
     query: str = Field(..., description="The user's question or request")
-    iterations: int = Field(20, ge=1, le=100, description="Number of search iterations")
-    max_depth: int = Field(5, ge=1, le=15, description="Maximum search depth")
+    iterations: Optional[int] = Field(None, ge=1, le=100, description="Number of search iterations (uses service default if not provided)")
+    max_depth: Optional[int] = Field(None, ge=1, le=15, description="Maximum search depth (uses service default if not provided)")
     models: List[str] = Field(default_factory=list, description="List of models to use")
     conversation_id: Optional[str] = Field(None, description="Conversation ID for context")
     previous_messages: List[Dict[str, str]] = Field(default_factory=list, description="Previous conversation messages")

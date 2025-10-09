@@ -97,7 +97,6 @@ _CONFIG_PATH = os.getenv("MODEL_INTEGRATION_CONFIG_FILE", "/app/logs/model_integ
 def _default_config() -> Dict[str, Any]:
     return {
         "ab_mcts_iterations": 20,
-        "ab_mcts_max_depth": 5,
         "auto_tools_enabled": True,
     }
 
@@ -109,7 +108,6 @@ def _load_config() -> Dict[str, Any]:
                 data = _json.load(f)
                 # basic validation
                 data["ab_mcts_iterations"] = int(data.get("ab_mcts_iterations", 20))
-                data["ab_mcts_max_depth"] = int(data.get("ab_mcts_max_depth", 5))
                 data["auto_tools_enabled"] = bool(data.get("auto_tools_enabled", True))
                 return data
     except Exception:
@@ -145,7 +143,6 @@ class ChatRequest(BaseModel):
     temperature: float = 0.7
     max_tokens: Optional[int] = None
     iterations: Optional[int] = None
-    max_depth: Optional[int] = None
 
 class ModelInfo(BaseModel):
     id: str
@@ -190,7 +187,6 @@ async def health():
         },
         "optimized_parameters": {
             "ab_mcts_iterations": configuration["ab_mcts_iterations"],
-            "ab_mcts_max_depth": configuration["ab_mcts_max_depth"],
             "auto_tools_enabled": configuration["auto_tools_enabled"],
         }
     }
@@ -225,8 +221,6 @@ async def update_configuration(request: Dict[str, Any]):
     try:
         if "ab_mcts_iterations" in request:
             configuration["ab_mcts_iterations"] = max(1, min(100, int(request["ab_mcts_iterations"])))
-        if "ab_mcts_max_depth" in request:
-            configuration["ab_mcts_max_depth"] = max(1, min(20, int(request["ab_mcts_max_depth"])))
         if "auto_tools_enabled" in request:
             configuration["auto_tools_enabled"] = bool(request["auto_tools_enabled"])
         _save_config(configuration)
@@ -280,6 +274,32 @@ async def chat_completions_alt(request: ChatRequest):
     """Alternative chat completions endpoint for Open WebUI compatibility."""
     return await handle_chat_completions(request)
 
+def clean_openwebui_auto_tasks(query: str) -> str:
+    """Remove Open WebUI's automatic task wrappers (tags, titles, follow-ups, etc).
+
+    Open WebUI wraps queries in prompts like:
+    ### Task: Generate tags/title/follow-ups...
+    ### Chat History:
+    USER: actual query
+    ASSISTANT: response
+
+    This extracts the actual USER query from the chat history.
+    """
+    import re
+
+    # Check if this looks like an auto-generated task (tags, titles, follow-ups, etc)
+    if "### Task:" in query and "### Chat History:" in query:
+        # Extract only the LAST user message (the actual current query)
+        # This handles multi-turn conversations
+        user_messages = re.findall(r'USER:\s*(.+?)(?=\s*(?:ASSISTANT:|USER:|$))', query, re.DOTALL | re.IGNORECASE)
+        if user_messages:
+            # Take the last user message (most recent query)
+            actual_query = user_messages[-1].strip()
+            print(f"[CLEANUP] Stripped Open WebUI auto-task wrapper (tags/title/follow-ups). Original: {len(query)} chars, cleaned: {len(actual_query)} chars")
+            return actual_query
+
+    return query
+
 async def handle_chat_completions(request: ChatRequest):
     """Handle chat completions logic."""
 
@@ -298,8 +318,11 @@ async def handle_chat_completions(request: ChatRequest):
     if not user_message:
         ACTIVE_QUERIES_GAUGE.dec()
         raise HTTPException(status_code=400, detail="No user message found")
-    
-    # Use the user message as-is (enrichment moved to separate tool)
+
+    # Clean Open WebUI auto-task wrappers (tags, titles, etc)
+    user_message = clean_openwebui_auto_tasks(user_message)
+
+    # Use the cleaned message
     enriched_message = user_message
     tool_context = ""
     tool_events: List[Dict[str, Any]] = []
@@ -363,9 +386,9 @@ def build_openai_stream_chunk(content: str, model: str, include_role: bool = Fal
 async def stream_ab_mcts(user_message: str, request: ChatRequest, tool_context: str = "", tool_events: Optional[List[Dict[str, Any]]] = None):
     """Stream AB-MCTS progress and final result to keep UI connection alive."""
     model_name = "ab-mcts"
-    # Resolve parameters: use request if provided, else configuration
-    resolved_iterations = request.iterations if request.iterations is not None else configuration["ab_mcts_iterations"]
-    resolved_max_depth = request.max_depth if request.max_depth is not None else configuration["ab_mcts_max_depth"]
+    # Let AB-MCTS service use its own stored defaults (don't override)
+    # Only pass parameters if explicitly provided in the request
+    resolved_iterations = request.iterations if request.iterations is not None else None
     
     # Track active query for dashboard auto-monitor
     global query_counter
@@ -377,14 +400,16 @@ async def stream_ab_mcts(user_message: str, request: ChatRequest, tool_context: 
         "status": "initializing",
         "start_time": start_time,
         "query_preview": user_message[:50] + "..." if len(user_message) > 50 else user_message,
-        "iterations": resolved_iterations,
-        "max_depth": resolved_max_depth
+        "iterations": resolved_iterations if resolved_iterations is not None else "default"
     }
     # Start run log
+    params = {}
+    if resolved_iterations is not None:
+        params["iterations"] = resolved_iterations
     run_id = experiment_logger.start_run(
         pipeline="ab-mcts",
         user_query=user_message,
-        parameters={"iterations": resolved_iterations, "max_depth": resolved_max_depth},
+        parameters=params,
         metadata={"query_id": query_id},
     )
     experiment_logger.log_event(run_id, {"type": "status", "status": "initializing"})
@@ -392,8 +417,9 @@ async def stream_ab_mcts(user_message: str, request: ChatRequest, tool_context: 
     # Initial role chunk
     yield build_openai_stream_chunk("", model_name, include_role=True)
     # Initial notice
+    iter_display = resolved_iterations if resolved_iterations is not None else "default"
     intro = (
-        f"Starting AB-MCTS... iterations={resolved_iterations}, max_depth={resolved_max_depth}\n"
+        f"Starting AB-MCTS... iterations={iter_display} (tree depth controlled by Thompson sampling)\n"
     )
     yield build_openai_stream_chunk(intro, model_name)
     if tool_context:
@@ -404,11 +430,10 @@ async def stream_ab_mcts(user_message: str, request: ChatRequest, tool_context: 
 
     # Kick off background request
     async with httpx.AsyncClient(timeout=600.0) as client:
-        payload = {
-            "query": user_message,
-            "iterations": resolved_iterations,
-            "max_depth": resolved_max_depth,
-        }
+        payload = {"query": user_message}
+        # Only include parameters if explicitly set (let service use its defaults otherwise)
+        if resolved_iterations is not None:
+            payload["iterations"] = resolved_iterations
         post_task = asyncio.create_task(
             client.post(f"{AB_MCTS_SERVICE_URL}/query", json=payload)
         )
@@ -555,8 +580,7 @@ async def call_ab_mcts(user_message: str, request: ChatRequest):
         "status": "initializing",
         "start_time": start_time,
         "query_preview": user_message[:50] + "..." if len(user_message) > 50 else user_message,
-        "iterations": request.iterations if hasattr(request, 'iterations') and request.iterations else configuration["ab_mcts_iterations"],
-        "max_depth": request.max_depth if hasattr(request, 'max_depth') and request.max_depth else configuration["ab_mcts_max_depth"]
+        "iterations": request.iterations if hasattr(request, 'iterations') and request.iterations is not None else "default"
     }
     
     try:
@@ -568,13 +592,14 @@ async def call_ab_mcts(user_message: str, request: ChatRequest):
             # Update status to querying models
             active_queries[query_id]["status"] = "querying_models"
             
+            # Build payload - only include params if explicitly provided
+            payload = {"query": user_message}
+            if hasattr(request, 'iterations') and request.iterations is not None:
+                payload["iterations"] = request.iterations
+
             response = await client.post(
                 f"{AB_MCTS_SERVICE_URL}/query",
-                json={
-                    "query": user_message,
-                    "iterations": request.iterations if hasattr(request, 'iterations') and request.iterations else configuration["ab_mcts_iterations"],
-                    "max_depth": request.max_depth if hasattr(request, 'max_depth') and request.max_depth else configuration["ab_mcts_max_depth"]
-                }
+                json=payload
             )
             response.raise_for_status()
             data = response.json()

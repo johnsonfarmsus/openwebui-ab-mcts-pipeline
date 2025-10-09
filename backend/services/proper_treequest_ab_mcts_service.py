@@ -33,6 +33,7 @@ from models import LLMState, QueryRequest, QueryResponse, SearchStats, Conversat
 # Import model discovery
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from model_discovery import ModelDiscoveryService
+from experiment_logger import ExperimentLogger
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 app = FastAPI(title="Proper TreeQuest AB-MCTS Service", version="6.0.0")
@@ -77,20 +78,29 @@ class NodeState:
     eval_results: Dict[str, Any]
     model_name: str
     search_type: str  # "width" or "depth"
+    depth: int = 0  # Track depth in tree (0 = root)
 
 class ProperTreeQuestABMCTSService:
     def __init__(self):
         self.ollama_url = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
         self.conversations = {}
-        
+
         # Initialize model discovery
         self.model_discovery = ModelDiscoveryService(self.ollama_url)
-        
+
         # Discover available models and set defaults
         self.available_models = self.model_discovery.discover_models()
         self._persist_path = os.getenv("MODEL_SELECTION_FILE", "/app/logs/selected_models_abmcts.json")
         self.models = self._load_selected_models() or self.model_discovery.get_recommended_models(for_testing=True)
-        
+
+        # Load configuration from persistence
+        from config_persistence import get_config_persistence
+        self.config_persistence = get_config_persistence()
+        self._load_config()
+
+        # Initialize experiment logger for research
+        self.experiment_logger = ExperimentLogger(base_dir="/app/logs")
+
         # Sakana AI TreeQuest configuration
         self.algo_config = {
             "class_name": "ABMCTSA",
@@ -98,12 +108,53 @@ class ProperTreeQuestABMCTSService:
                 "model_selection_strategy": "stack"
             }
         }
-        
+
         # Initialize TreeQuest algorithm
         self.algo_cls = getattr(tq, self.algo_config["class_name"])
         self.algo = self.algo_cls(**self.algo_config["params"])
+
+    def _load_config(self):
+        """Load configuration from persistence."""
+        config = self.config_persistence.load_config("ab-mcts")
+
+        if config:
+            # Load judge models
+            self.judge_models = config.get("judge_models", [])
+            # Load iterations
+            self.default_iterations = config.get("iterations", 20)
+            # Load regular models if saved
+            saved_models = config.get("models", [])
+            if saved_models:
+                self.models = saved_models
+            # Load criterion weights
+            self.criterion_weights = config.get("criterion_weights", {
+                "accuracy": 0.25,
+                "completeness": 0.25,
+                "clarity": 0.25,
+                "relevance": 0.25
+            })
+        else:
+            # Defaults
+            self.judge_models = []
+            self.default_iterations = 20
+            self.criterion_weights = {
+                "accuracy": 0.25,
+                "completeness": 0.25,
+                "clarity": 0.25,
+                "relevance": 0.25
+            }
+
+    def _save_config(self):
+        """Save configuration to persistence."""
+        config = {
+            "models": self.models,
+            "judge_models": self.judge_models,
+            "iterations": self.default_iterations,
+            "criterion_weights": self.criterion_weights
+        }
+        self.config_persistence.save_config("ab-mcts", config)
         
-    def call_ollama(self, model: str, prompt: str, temperature: float = 0.6) -> str:
+    def call_ollama(self, model: str, prompt: str, temperature: float = 0.6, max_tokens: int = 1000) -> str:
         """Call Ollama API with error handling."""
         try:
             response = requests.post(
@@ -114,7 +165,7 @@ class ProperTreeQuestABMCTSService:
                     "stream": False,
                     "options": {
                         "temperature": temperature,
-                        "max_tokens": 1000
+                        "num_predict": max_tokens  # Ollama uses num_predict, not max_tokens
                     }
                 },
                 timeout=30
@@ -129,60 +180,300 @@ class ProperTreeQuestABMCTSService:
         except Exception as e:
             return f"Error: {str(e)}"
     
-    def evaluate_solution_quality(self, solution: str, query: str) -> float:
-        """Evaluate solution quality with better scoring heuristics."""
+    def _parse_multi_score(self, response: str) -> Dict[str, float]:
+        """Parse multi-criterion scores from judge response.
+
+        Expected format:
+        accuracy: 0.85
+        completeness: 0.90
+        clarity: 0.75
+        relevance: 0.80
+        """
+        import re
+
+        scores = {}
+        criteria = ["accuracy", "completeness", "clarity", "relevance"]
+
+        for criterion in criteria:
+            # Try to find: "criterion: 0.XX"
+            pattern = rf'{criterion}\s*:\s*(\d*\.?\d+)'
+            match = re.search(pattern, response, re.IGNORECASE)
+
+            if match:
+                try:
+                    score = float(match.group(1))
+                    # Clamp to [0, 1]
+                    scores[criterion] = max(0.0, min(1.0, score))
+                except ValueError:
+                    scores[criterion] = None
+            else:
+                scores[criterion] = None
+
+        return scores
+
+    def evaluate_solution_quality(self, solution: str, query: str) -> Tuple[float, Dict[str, Any]]:
+        """Evaluate solution quality using multi-criterion LLM-as-judge.
+
+        Uses 1 or 2 judge models to evaluate response on 4 criteria:
+        - Accuracy: Is it factually correct?
+        - Completeness: Does it fully answer the question?
+        - Clarity: Is it well-explained and understandable?
+        - Relevance: Is it on-topic and directly addresses the query?
+
+        Returns:
+            Tuple of (weighted_score, evaluation_details)
+        """
         if not solution or "Error:" in solution:
-            return 0.0
+            return 0.0, {"error": "Invalid solution"}
 
-        # Length quality - prefer moderate length, penalize both too short and too long
-        # Optimal range: 100-500 characters for most queries
-        length = len(solution)
-        if length < 50:
-            length_score = length / 100  # Too short
-        elif length < 500:
-            length_score = 1.0  # Good length
-        elif length < 1500:
-            length_score = 1.0 - ((length - 500) / 2000)  # Getting too long
-        else:
-            length_score = 0.3  # Way too long, likely rambling
+        # If no judge models configured, return neutral score
+        if not self.judge_models:
+            print("Warning: No judge models configured, using neutral score 0.5")
+            return 0.5, {"warning": "No judge models configured"}
 
-        # Structure quality - prefer organized responses
-        structure_indicators = ["1.", "2.", "3.", "First", "Second", "Third", "Therefore", "However", "In conclusion"]
-        structure_score = min(sum(1 for indicator in structure_indicators if indicator in solution) / 5, 1.0)
+        # Multi-criterion prompt with strict formatting
+        judge_prompt = f"""Rate this response on each criterion (0.0-1.0):
 
-        # Relevance quality - must contain query terms
-        query_terms = set(query.lower().split())
-        solution_terms = set(solution.lower().split())
-        relevance_score = len(query_terms.intersection(solution_terms)) / max(len(query_terms), 1)
+Query: {query}
 
-        # Confidence quality
-        confidence_indicators = ["definitely", "certainly", "clearly", "specifically", "exactly"]
-        uncertainty_indicators = ["maybe", "perhaps", "might", "unclear", "not sure", "unknown"]
+Response: {solution}
 
-        confidence_boost = min(sum(1 for indicator in confidence_indicators if indicator in solution.lower()) * 0.05, 0.15)
-        confidence_penalty = sum(1 for indicator in uncertainty_indicators if indicator in solution.lower()) * 0.15
+Evaluate on these criteria:
+- Accuracy: Is it factually correct?
+- Completeness: Does it fully answer the question?
+- Clarity: Is it well-explained and understandable?
+- Relevance: Is it on-topic and addresses the query?
 
-        # Repetition penalty - detect repetitive text
-        words = solution.lower().split()
-        if len(words) > 20:
-            unique_words = len(set(words))
-            repetition_ratio = unique_words / len(words)
-            repetition_penalty = 0.0 if repetition_ratio > 0.7 else (0.7 - repetition_ratio) * 0.5
-        else:
-            repetition_penalty = 0.0
+Output EXACTLY in this format (replace X.XX with your scores):
+accuracy: X.XX
+completeness: X.XX
+clarity: X.XX
+relevance: X.XX
 
-        # Calculate overall quality - emphasize relevance and conciseness
-        quality = (
-            length_score * 0.25 +
-            structure_score * 0.15 +
-            relevance_score * 0.50 +
-            confidence_boost -
-            confidence_penalty -
-            repetition_penalty
-        )
+Example:
+accuracy: 0.85
+completeness: 0.90
+clarity: 0.75
+relevance: 0.95
 
-        return max(0.0, min(1.0, quality))
-    
+Your ratings:
+"""
+
+        # Collect scores from each judge
+        all_criterion_scores = {
+            "accuracy": [],
+            "completeness": [],
+            "clarity": [],
+            "relevance": []
+        }
+        judge_details = {}
+
+        # Query each judge model
+        for judge_model in self.judge_models:
+            try:
+                print(f"[JUDGE] Calling {judge_model} for multi-criterion evaluation")
+
+                # Token allocation for multi-criterion (need space for 4 scores)
+                max_tokens = min(300 + (len(solution) // 20), 500)
+
+                response = self.call_ollama(
+                    judge_model,
+                    judge_prompt,
+                    temperature=0.1,
+                    max_tokens=max_tokens
+                )
+
+                print(f"[JUDGE] Response ({len(response)} chars): {response[:200]}")
+
+                # Parse multi-criterion scores
+                criterion_scores = self._parse_multi_score(response)
+                print(f"[JUDGE] Parsed scores: {criterion_scores}")
+
+                # Validate that we got scores
+                valid_scores = {k: v for k, v in criterion_scores.items() if v is not None}
+
+                if len(valid_scores) >= 2:  # Need at least 2 criteria scored
+                    # Collect scores for averaging across judges
+                    for criterion, score in valid_scores.items():
+                        all_criterion_scores[criterion].append(score)
+
+                    judge_details[judge_model] = {
+                        "breakdown": criterion_scores,
+                        "raw_response": response.strip(),
+                        "num_criteria_scored": len(valid_scores)
+                    }
+                    print(f"[JUDGE] Successfully scored {len(valid_scores)} criteria")
+                else:
+                    # Fallback: try to extract a single overall score
+                    print(f"[JUDGE] Multi-score parsing failed, trying single score extraction")
+                    single_score = self._extract_score(response)
+                    if single_score is not None:
+                        # Use same score for all criteria
+                        for criterion in all_criterion_scores.keys():
+                            all_criterion_scores[criterion].append(single_score)
+                        judge_details[judge_model] = {
+                            "breakdown": {k: single_score for k in all_criterion_scores.keys()},
+                            "raw_response": response.strip(),
+                            "fallback_mode": True
+                        }
+                    else:
+                        judge_details[judge_model] = {
+                            "error": "Could not parse scores",
+                            "raw_response": response.strip()
+                        }
+
+            except Exception as e:
+                print(f"[JUDGE] Exception calling {judge_model}: {type(e).__name__}: {e}")
+                judge_details[judge_model] = {
+                    "error": str(e)
+                }
+
+        # Average scores across judges for each criterion
+        criterion_averages = {}
+        for criterion, scores_list in all_criterion_scores.items():
+            if scores_list:
+                criterion_averages[criterion] = sum(scores_list) / len(scores_list)
+            else:
+                criterion_averages[criterion] = None
+
+        # Calculate weighted final score
+        valid_criteria = {k: v for k, v in criterion_averages.items() if v is not None}
+
+        if valid_criteria:
+            # Apply weights (normalize if some criteria missing)
+            total_weight = sum(self.criterion_weights.get(k, 0.25) for k in valid_criteria.keys())
+
+            weighted_score = sum(
+                score * (self.criterion_weights.get(criterion, 0.25) / total_weight)
+                for criterion, score in valid_criteria.items()
+            )
+
+            return weighted_score, {
+                "criterion_scores": criterion_averages,
+                "weights": self.criterion_weights,
+                "final_score": weighted_score,
+                "num_judges": len([j for j in judge_details.values() if "error" not in j]),
+                "judge_details": judge_details
+            }
+
+        # Fallback if all judges failed
+        print("[JUDGE] All judges failed, using neutral score 0.5")
+        return 0.5, {
+            "error": "All judges failed",
+            "fallback_score": 0.5,
+            "judge_details": judge_details
+        }
+
+    def _extract_score(self, response: str) -> Optional[float]:
+        """Extract numeric score from judge response.
+
+        Args:
+            response: Judge model response
+
+        Returns:
+            Score between 0.0 and 1.0, or None if not found
+        """
+        import re
+
+        # Remove whitespace
+        response = response.strip()
+
+        # Try to find a number (decimal or whole)
+        # Priority order: most specific to most general
+        patterns = [
+            r'<score>(\d*\.?\d+)</score>',  # XML tag format (our preferred format)
+            r'<score>(\d*\.?\d+)',  # Incomplete closing tag
+            r'score[:\s]+(\d*\.?\d+)',  # Score: 0.85
+            r'</think>\s*(\d*\.?\d+)',  # After closing think tag
+            r'</think>\s*score[:\s]*(\d*\.?\d+)',  # After think, then Score:
+            r'^(\d*\.?\d+)$',  # Just a number: 0.85
+            r'^(\d+)%$',  # Percentage: 85%
+            r'(\d*\.?\d+)\s*out of\s*1',  # X out of 1
+            r'(\d*\.?\d+)\s*/\s*1',  # X/1
+            r'rating[:\s]+(\d*\.?\d+)',  # Rating: 0.85
+            r'(\d*\.?\d+)\s*/\s*1\.?0',  # X/1.0
+            # Fallback: find ANY decimal number between 0 and 1
+            r'\b(0\.\d+|1\.0+|1)\b',  # Any decimal 0.x or 1.0
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, response, re.MULTILINE | re.DOTALL)
+            if match:
+                try:
+                    score = float(match.group(1))
+
+                    # Convert percentage to decimal
+                    if '%' in response:
+                        score = score / 100
+
+                    # Clamp to [0, 1]
+                    score = max(0.0, min(1.0, score))
+
+                    # Sanity check: scores outside [0,1] before clamping indicate bad parse
+                    if score > 1.5:  # Likely parsed wrong number
+                        continue
+
+                    return score
+
+                except (ValueError, IndexError):
+                    continue
+
+        return None
+
+    def _extract_tree_structure(self, search_tree) -> Dict[str, Any]:
+        """Extract hierarchical tree structure with parent-child relationships.
+
+        Args:
+            search_tree: The TreeQuest search tree (ABMCTSMState)
+
+        Returns:
+            Dictionary representing the tree hierarchy
+        """
+        try:
+            # Access the actual tree from ABMCTSMState
+            tree = search_tree.tree if hasattr(search_tree, 'tree') else search_tree
+            root_node = tree.root if hasattr(tree, 'root') else None
+
+            if not root_node:
+                return {"type": "root", "children": []}
+
+            # Recursively build tree structure
+            node_id_counter = [0]  # Use list to make it mutable in nested function
+
+            def build_node_dict(node, depth=0) -> Dict[str, Any]:
+                node_id = node_id_counter[0]
+                node_id_counter[0] += 1
+
+                node_dict = {
+                    "id": node_id,
+                    "depth": depth,
+                    "score": getattr(node, 'score', 0.0),
+                    "children": []
+                }
+
+                # Add state info if available
+                if hasattr(node, 'state') and node.state is not None:
+                    state = node.state
+                    node_dict.update({
+                        "model": getattr(state, 'model_name', 'unknown'),
+                        "search_type": getattr(state, 'search_type', 'unknown'),
+                        "quality": getattr(state, 'eval_results', {}).get('quality', 0.0),
+                        "preview": (getattr(state, 'generation_result', '') or '')[:80]
+                    })
+
+                # Recursively add children
+                if hasattr(node, 'children'):
+                    for child in node.children:
+                        node_dict["children"].append(build_node_dict(child, depth + 1))
+
+                return node_dict
+
+            return build_node_dict(root_node)
+
+        except Exception as e:
+            print(f"Error extracting tree structure: {e}")
+            return {"type": "root", "children": [], "error": str(e)}
+
     def generate_width_prompt(self, query: str) -> str:
         """Generate width prompt for new solutions."""
         return f"""You are an expert AI assistant. Please provide a comprehensive answer to the following question:
@@ -216,37 +507,48 @@ Enhanced Response:"""
     def generate_fn(self, state: Optional[NodeState], model_name: str, query: str) -> Tuple[NodeState, float]:
         """Generate function for TreeQuest AB-MCTS."""
         start_time = time.time()
-        
-        # Determine if this is width or depth search
+
+        # Determine current depth and search type
+        current_depth = state.depth if state is not None else 0
+
         if state is None or not state.generation_result:
             # Width search - generate new solution
             prompt = self.generate_width_prompt(query)
             search_type = "width"
+            new_depth = 1
         else:
             # Depth search - refine existing solution
             prompt = self.generate_depth_prompt(state.generation_result, query)
             search_type = "depth"
-        
+            new_depth = current_depth + 1
+
         # Get response from model
         response = self.call_ollama(model_name, prompt, temperature=0.6)
-        
-        # Evaluate quality
-        quality = self.evaluate_solution_quality(response, query)
-        
-        # Create node state
-        node_state = NodeState(
-            generation_result=response,
-            eval_results={"quality": quality, "search_type": search_type},
-            model_name=model_name,
-            search_type=search_type
-        )
-        
+
+        # Evaluate quality with judge details
+        quality, judge_details = self.evaluate_solution_quality(response, query)
+
         # Calculate execution time
         execution_time = time.time() - start_time
-        
+
+        # Create node state with full details
+        node_state = NodeState(
+            generation_result=response,
+            eval_results={
+                "quality": quality,
+                "search_type": search_type,
+                "judge_details": judge_details,
+                "execution_time": execution_time,
+                "timestamp": time.time()
+            },
+            model_name=model_name,
+            search_type=search_type,
+            depth=new_depth
+        )
+
         return node_state, quality
     
-    def run_proper_treequest_ab_mcts(self, query: str, iterations: int = 20, max_depth: int = 5, include_tree: bool = False) -> Dict[str, Any]:
+    def run_proper_treequest_ab_mcts(self, query: str, iterations: int = 20, include_tree: bool = False) -> Dict[str, Any]:
         """Run proper TreeQuest AB-MCTS algorithm."""
         start_time = time.time()
         
@@ -273,27 +575,36 @@ Enhanced Response:"""
         }
         
         iteration_log: List[Dict[str, Any]] = []
-        for i in range(min(iterations, 20)):  # Limit to 20 iterations
+
+        for i in range(iterations):  # Use full iterations value
             # Run one step of AB-MCTS
             search_tree = self.algo.step(search_tree, generate_fns)
-            
+
             # Get current state-score pairs
             state_score_pairs = self.algo.get_state_score_pairs(search_tree)
             search_stats["nodes_created"] = len(state_score_pairs)
-            if include_tree:
-                # Compact snapshot for visualization
-                iteration_log.append({
-                    "iteration": i + 1,
-                    "nodes": [
-                        {
-                            "model": getattr(state, 'model_name', getattr(state, 'model_used', 'unknown')),
-                            "quality": score,
-                            "search_type": getattr(state, 'search_type', getattr(state, 'eval_results', {}).get('search_type', 'unknown')),
-                            "preview": (getattr(state, 'generation_result', getattr(state, 'content', '')) or '')[:120]
-                        }
-                        for state, score in state_score_pairs[:100]
-                    ]
-                })
+
+            # Extract tree structure with parent-child relationships
+            tree_structure = self._extract_tree_structure(search_tree)
+
+            # ALWAYS capture full tree data for research (not just when include_tree=True)
+            # Store complete node information with full responses
+            iteration_log.append({
+                "iteration": i + 1,
+                "timestamp": time.time(),
+                "nodes": [
+                    {
+                        "model": getattr(state, 'model_name', getattr(state, 'model_used', 'unknown')),
+                        "quality": score,
+                        "search_type": getattr(state, 'search_type', getattr(state, 'eval_results', {}).get('search_type', 'unknown')),
+                        "full_response": getattr(state, 'generation_result', getattr(state, 'content', '')),  # FULL response, not preview
+                        "eval_results": getattr(state, 'eval_results', {}),  # Includes judge details
+                        "preview": (getattr(state, 'generation_result', getattr(state, 'content', '')) or '')[:120]  # Keep preview for UI
+                    }
+                    for state, score in state_score_pairs[:100]  # Limit to 100 nodes per iteration for performance
+                ],
+                "tree_structure": tree_structure  # Add actual tree hierarchy
+            })
             
             # Count search types
             width_count = 0
@@ -335,11 +646,13 @@ Enhanced Response:"""
         # Calculate final statistics
         search_stats["average_quality"] = best_score
         search_stats["response_time"] = time.time() - start_time
-        
+
+        # Return full iteration log for experiment logging (UI can filter if needed)
         return {
             "solution": best_solution,
             "search_stats": search_stats,
-            "iteration_log": iteration_log if include_tree else []
+            "iteration_log": iteration_log,  # Always include for research
+            "final_best_score": best_score
         }
     
     def update_models(self, model_names: List[str]) -> bool:
@@ -348,23 +661,84 @@ Enhanced Response:"""
             # Validate models are available
             validation = self.model_discovery.validate_models(model_names)
             unavailable = [name for name, available in validation.items() if not available]
-            
+
             if unavailable:
                 print(f"Warning: Some models not available: {unavailable}")
-            
-            # Update models list and persist
+
+            # Update models list
             self.models = [name for name in model_names if validation.get(name, False)]
-            self._save_selected_models()
-            
+
             if not self.models:
                 print("Error: No valid models selected")
                 return False
-                
+
+            # Persist configuration
+            self._save_config()
+
             print(f"Updated models: {self.models}")
             return True
-            
+
         except Exception as e:
             print(f"Error updating models: {e}")
+            return False
+
+    def update_judge_models(self, judge_model_names: List[str]) -> bool:
+        """Update the judge models used for evaluation.
+
+        Args:
+            judge_model_names: List of 1-2 judge model names
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Limit to 2 judges
+            if len(judge_model_names) > 2:
+                print("Warning: Maximum 2 judge models allowed, taking first 2")
+                judge_model_names = judge_model_names[:2]
+
+            # Validate models are available
+            validation = self.model_discovery.validate_models(judge_model_names)
+            unavailable = [name for name, available in validation.items() if not available]
+
+            if unavailable:
+                print(f"Warning: Some judge models not available: {unavailable}")
+
+            # Update judge models list
+            self.judge_models = [name for name in judge_model_names if validation.get(name, False)]
+
+            # Persist configuration
+            self._save_config()
+
+            print(f"Updated judge models: {self.judge_models}")
+            return True
+
+        except Exception as e:
+            print(f"Error updating judge models: {e}")
+            return False
+
+    def update_search_params(self, iterations: Optional[int] = None) -> bool:
+        """Update default search parameters.
+
+        Args:
+            iterations: Default iterations (1-100). More iterations allow Thompson sampling
+                       to naturally explore deeper trees through exploitation.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if iterations is not None:
+                self.default_iterations = max(1, min(100, iterations))
+
+            # Persist configuration
+            self._save_config()
+
+            print(f"Updated search params: iterations={self.default_iterations}")
+            return True
+
+        except Exception as e:
+            print(f"Error updating search params: {e}")
             return False
     
     def get_available_models(self) -> List[Dict[str, Any]]:
@@ -407,21 +781,56 @@ Enhanced Response:"""
         except Exception:
             pass
     
-    def process_query(self, query: str, iterations: int = 20, max_depth: int = 5, 
+    def process_query(self, query: str, iterations: int = 20,
                      conversation_id: Optional[str] = None, models: Optional[List[str]] = None) -> QueryResponse:
         """Process a query using proper TreeQuest AB-MCTS."""
+        run_id = None
         try:
             AB_MCTS_QUERIES.inc()
+
+            # Start experiment logging
+            run_id = self.experiment_logger.start_run(
+                pipeline="ab-mcts",
+                user_query=query,
+                parameters={
+                    "iterations": iterations,
+                    "models": self.models,
+                    "judge_models": self.judge_models
+                },
+                metadata={
+                    "conversation_id": conversation_id or str(uuid.uuid4())
+                }
+            )
+
             # Update models if provided
             if models:
                 self.update_models(models)
-            
+
             # Run proper TreeQuest AB-MCTS search
             include_tree = True  # always capture for research; UI can ignore
             t0 = time.time()
-            result = self.run_proper_treequest_ab_mcts(query, iterations, max_depth, include_tree)
+            result = self.run_proper_treequest_ab_mcts(query, iterations, include_tree)
             AB_MCTS_LATENCY.observe(time.time() - t0)
-            
+
+            # Log each iteration to the experiment log
+            for iteration_data in result.get("iteration_log", []):
+                self.experiment_logger.log_event(run_id, {
+                    "type": "iteration",
+                    "iteration": iteration_data["iteration"],
+                    "timestamp": iteration_data.get("timestamp"),
+                    "node_count": len(iteration_data["nodes"]),
+                    "nodes": iteration_data["nodes"],  # Full nodes with complete responses
+                    "tree_structure": iteration_data.get("tree_structure", {})  # Include hierarchical tree structure
+                })
+
+            # Log final result
+            self.experiment_logger.finish_run(run_id, {
+                "solution": result["solution"],
+                "search_stats": result["search_stats"],
+                "final_best_score": result.get("final_best_score", 0.0),
+                "total_nodes_explored": len(result.get("iteration_log", []))
+            })
+
             # Create response
             response = QueryResponse(
                 result=result["solution"],
@@ -431,15 +840,19 @@ Enhanced Response:"""
                 turn_id=str(uuid.uuid4()),
                 iteration_log=result.get("iteration_log", [])
             )
-            
+
             # Metrics from search stats
             stats = result["search_stats"]
             AB_MCTS_ITERATIONS.observe(stats.get("total_iterations", 0) or 0)
             AB_MCTS_NODES.observe(stats.get("nodes_created", 0) or 0)
             AB_MCTS_SUCCESS.inc()
             return response
-            
+
         except Exception as e:
+            # Log failure to experiment log
+            if run_id:
+                self.experiment_logger.fail_run(run_id, str(e))
+
             return QueryResponse(
                 result="",
                 success=False,
@@ -465,10 +878,12 @@ async def metrics():
 async def process_query_endpoint(request: QueryRequest):
     """Process a query using proper TreeQuest AB-MCTS."""
     try:
+        # Use saved defaults if not explicitly provided in request
+        iterations = request.iterations if request.iterations is not None else service.default_iterations
+
         response = service.process_query(
             query=request.query,
-            iterations=request.iterations,
-            max_depth=request.max_depth,
+            iterations=iterations,
             conversation_id=request.conversation_id,
             models=getattr(request, 'models', None)
         )
@@ -484,7 +899,8 @@ async def get_models():
         return {
             "success": True,
             "models": models,
-            "current_models": service.models
+            "current_models": service.models,
+            "judge_models": service.judge_models
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -518,8 +934,7 @@ async def test_models(request: Dict[str, Any]):
         # Run test query
         response = service.process_query(
             query=test_query,
-            iterations=5,
-            max_depth=2
+            iterations=5
         )
         
         # Restore original models
@@ -535,6 +950,85 @@ async def test_models(request: Dict[str, Any]):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/judges/update")
+async def update_judges(request: Dict[str, Any]):
+    """Update the judge models used for evaluation."""
+    try:
+        judge_model_names = request.get("judge_models", [])
+        success = service.update_judge_models(judge_model_names)
+
+        return {
+            "success": success,
+            "message": "Judge models updated successfully" if success else "Failed to update judge models",
+            "judge_models": service.judge_models
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/params/update")
+async def update_params(request: Dict[str, Any]):
+    """Update default search parameters."""
+    try:
+        iterations = request.get("iterations")
+
+        success = service.update_search_params(iterations=iterations)
+
+        return {
+            "success": success,
+            "message": "Search parameters updated successfully. Tree depth controlled by Thompson sampling." if success else "Failed to update search parameters",
+            "iterations": service.default_iterations
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/weights/update")
+async def update_weights(request: Dict[str, Any]):
+    """Update criterion weights for judge evaluation."""
+    try:
+        weights = request.get("weights", {})
+
+        # Validate weights
+        required_criteria = ["accuracy", "completeness", "clarity", "relevance"]
+        for criterion in required_criteria:
+            if criterion not in weights:
+                raise HTTPException(status_code=400, detail=f"Missing weight for '{criterion}'")
+
+            weight = weights[criterion]
+            if not isinstance(weight, (int, float)) or weight < 0 or weight > 1:
+                raise HTTPException(status_code=400, detail=f"Invalid weight for '{criterion}': must be 0.0-1.0")
+
+        # Normalize weights to sum to 1.0
+        total = sum(weights.values())
+        if total == 0:
+            raise HTTPException(status_code=400, detail="Weights cannot all be zero")
+
+        normalized_weights = {k: v / total for k, v in weights.items()}
+
+        # Update and save
+        service.criterion_weights = normalized_weights
+        service._save_config()
+
+        return {
+            "success": True,
+            "message": "Criterion weights updated successfully",
+            "weights": service.criterion_weights
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/config")
+async def get_config():
+    """Get current configuration."""
+    return {
+        "success": True,
+        "models": service.models,
+        "judge_models": service.judge_models,
+        "iterations": service.default_iterations,
+        "criterion_weights": service.criterion_weights
+    }
+
 @app.get("/stats")
 async def get_stats():
     """Get service statistics."""
@@ -542,8 +1036,112 @@ async def get_stats():
         "service": "proper-treequest-ab-mcts",
         "status": "running",
         "models": service.models,
+        "judge_models": service.judge_models,
+        "default_iterations": service.default_iterations,
         "algo_config": service.algo_config
     }
+
+@app.get("/runs")
+async def list_runs(limit: int = 50):
+    """List recent experiment runs."""
+    try:
+        runs = service.experiment_logger.list_runs(limit=limit)
+        return {
+            "success": True,
+            "runs": runs,
+            "count": len(runs)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/runs/{run_id}")
+async def get_run(run_id: str):
+    """Get detailed information about a specific run."""
+    try:
+        run = service.experiment_logger.get_run(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+
+        # Get event stream (full tree data)
+        events = service.experiment_logger.read_events(run_id)
+
+        return {
+            "success": True,
+            "run": run,
+            "events": events,
+            "event_count": len(events)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/runs/{run_id}/tree")
+async def get_run_tree(run_id: str):
+    """Get the tree visualization data for a specific run."""
+    try:
+        run = service.experiment_logger.get_run(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+
+        # Get all iteration events
+        events = service.experiment_logger.read_events(run_id)
+        print(f"[DEBUG /tree] Total events: {len(events)}")
+
+        # Check if this is old format (iterations array) or new format (tree_structure)
+        iteration_events = [e for e in events if e.get("type") == "iteration"]
+        print(f"[DEBUG /tree] Iteration events: {len(iteration_events)}")
+
+        if not iteration_events:
+            raise HTTPException(status_code=404, detail="No iteration data found for this run")
+
+        # Check if we have tree_structure in the last iteration
+        last_iteration = iteration_events[-1] if iteration_events else {}
+        print(f"[DEBUG /tree] Last iteration keys: {list(last_iteration.keys())}")
+        has_tree_structure = "tree_structure" in last_iteration
+        print(f"[DEBUG /tree] Has tree_structure: {has_tree_structure}")
+
+        if has_tree_structure:
+            # NEW FORMAT: Use tree_structure from last iteration
+            final_tree_structure = last_iteration.get("tree_structure", {"type": "root", "children": []})
+            all_nodes = last_iteration.get("nodes", [])
+            total_iterations = last_iteration.get("iteration", len(iteration_events))
+
+            tree_data = {
+                "run_id": run_id,
+                "query": run.get("user_query"),
+                "parameters": run.get("parameters"),
+                "total_iterations": total_iterations,
+                "total_nodes": len(all_nodes),
+                "tree_structure": final_tree_structure,
+                "nodes": all_nodes
+            }
+        else:
+            # OLD FORMAT: Return iterations array for backward compatibility
+            tree_data = {
+                "run_id": run_id,
+                "query": run.get("user_query"),
+                "parameters": run.get("parameters"),
+                "iterations": [
+                    {
+                        "iteration": e.get("iteration"),
+                        "timestamp": e.get("timestamp"),
+                        "node_count": e.get("node_count"),
+                        "nodes": e.get("nodes", []),
+                        "tree_structure": {"type": "root", "children": []}  # Empty for old format
+                    }
+                    for e in iteration_events
+                ]
+            }
+
+        return {
+            "success": True,
+            "tree_data": tree_data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8094)

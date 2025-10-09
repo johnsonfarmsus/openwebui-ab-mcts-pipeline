@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AB-MCTS & Multi-Model Pipeline Dashboard</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -458,26 +459,64 @@
             <!-- AB-MCTS Configuration -->
             <div class="card">
                 <h2>🧠 AB-MCTS Configuration</h2>
+                <h3 style="margin: 20px 0 10px 0; color: #667eea; font-size: 1.1rem;">🤖 Search Models</h3>
+                <p style="color: #6c757d; font-size: 0.9rem; margin-bottom: 15px;">Models that generate and explore solutions during tree search</p>
                 <div id="ab-mcts-models">
                     <div class="loading show">
                         <div class="spinner"></div>
                         <p>Loading AB-MCTS models...</p>
                     </div>
                 </div>
+
+                <h3 style="margin: 20px 0 10px 0; color: #764ba2; font-size: 1.1rem;">⚖️ Judge Models (LLM-as-Judge)</h3>
+                <p style="color: #6c757d; font-size: 0.9rem; margin-bottom: 15px;">Select 1-2 models to evaluate solution quality (no heuristics)</p>
+                <div id="ab-mcts-judges">
+                    <div class="loading show">
+                        <div class="spinner"></div>
+                        <p>Loading judge models...</p>
+                    </div>
+                </div>
+
+                <h3 style="margin: 20px 0 10px 0; color: #764ba2; font-size: 1.1rem;">📊 Criterion Weights</h3>
+                <p style="color: #6c757d; font-size: 0.9rem; margin-bottom: 15px;">Adjust the importance of each evaluation criterion (will auto-normalize to 100%)</p>
+                <div class="controls" id="criterion-weights-container">
+                    <div style="display: grid; grid-template-columns: 120px 1fr 80px; gap: 15px; align-items: center; margin-bottom: 10px;">
+                        <label>Accuracy:</label>
+                        <input type="range" id="weight-accuracy" min="0" max="100" value="25" oninput="updateWeightDisplay('accuracy', this.value)">
+                        <span id="weight-accuracy-display" style="text-align: right; font-weight: bold;">25%</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 120px 1fr 80px; gap: 15px; align-items: center; margin-bottom: 10px;">
+                        <label>Completeness:</label>
+                        <input type="range" id="weight-completeness" min="0" max="100" value="25" oninput="updateWeightDisplay('completeness', this.value)">
+                        <span id="weight-completeness-display" style="text-align: right; font-weight: bold;">25%</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 120px 1fr 80px; gap: 15px; align-items: center; margin-bottom: 10px;">
+                        <label>Clarity:</label>
+                        <input type="range" id="weight-clarity" min="0" max="100" value="25" oninput="updateWeightDisplay('clarity', this.value)">
+                        <span id="weight-clarity-display" style="text-align: right; font-weight: bold;">25%</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 120px 1fr 80px; gap: 15px; align-items: center; margin-bottom: 10px;">
+                        <label>Relevance:</label>
+                        <input type="range" id="weight-relevance" min="0" max="100" value="25" oninput="updateWeightDisplay('relevance', this.value)">
+                        <span id="weight-relevance-display" style="text-align: right; font-weight: bold;">25%</span>
+                    </div>
+                    <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px; text-align: center;">
+                        <strong>Total:</strong> <span id="weight-total-display" style="color: #667eea;">100%</span>
+                    </div>
+                </div>
+
+                <h3 style="margin: 20px 0 10px 0; color: #2c3e50; font-size: 1.1rem;">⚙️ Search Parameters</h3>
                 <div class="controls">
                     <div class="control-group">
                         <label for="ab-mcts-iterations">Iterations:</label>
                         <input type="number" id="ab-mcts-iterations" value="20" min="1" max="100">
-                        <small>More iterations = better quality but slower response</small>
-                    </div>
-                    <div class="control-group">
-                        <label for="ab-mcts-depth">Max Depth:</label>
-                        <input type="number" id="ab-mcts-depth" value="5" min="1" max="20">
-                        <small>Deeper trees = more thorough search but slower response</small>
+                        <small>More iterations = better quality and deeper trees. Thompson sampling automatically balances depth vs width exploration.</small>
                     </div>
                 </div>
                 <div class="controls">
-                    <button class="btn" onclick="updateABMCTSModels()">Update AB-MCTS Models</button>
+                    <button class="btn" onclick="updateABMCTSModels()">Update Search Models</button>
+                    <button class="btn" onclick="updateJudgeModels()" style="background: linear-gradient(45deg, #764ba2, #667eea);">Update Judge Models</button>
+                    <button class="btn" onclick="updateCriterionWeights()" style="background: linear-gradient(45deg, #764ba2, #667eea);">Update Criterion Weights</button>
                     <button class="btn btn-success" onclick="updateABMCTSParameters()">Update Parameters</button>
                     <button class="btn btn-secondary" onclick="testABMCTSModels()">Test Models</button>
                 </div>
@@ -558,13 +597,72 @@
             </div>
         </div>
 
-        <!-- Runs & Evals -->
-        <div class="card">
-            <h2>📜 Runs</h2>
-            <div id="runs-table">
-                <div class="loading show">
-                    <div class="spinner"></div>
-                    <p>Loading recent runs...</p>
+        <!-- Runs & Tree Visualization -->
+        <div class="card" style="grid-column: 1 / -1;">
+            <h2>🌳 Research Explorer: AB-MCTS Runs & Tree Visualization</h2>
+
+            <div style="display: flex; gap: 20px; margin-bottom: 20px;">
+                <!-- Runs List -->
+                <div style="flex: 1; min-width: 300px;">
+                    <h3 style="margin-bottom: 10px;">Recent Runs</h3>
+                    <div id="runs-list" style="max-height: 400px; overflow-y: auto; border: 1px solid #e9ecef; border-radius: 8px; padding: 10px;">
+                        <div class="loading show">
+                            <div class="spinner"></div>
+                            <p>Loading runs...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Run Info Panel -->
+                <div style="flex: 1; min-width: 300px;">
+                    <h3 style="margin-bottom: 10px;">Run Details</h3>
+                    <div id="run-details" style="border: 1px solid #e9ecef; border-radius: 8px; padding: 15px; background: #f8f9fa;">
+                        <p style="color: #6c757d; font-style: italic;">Select a run to view details</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tree Visualization -->
+            <div id="tree-visualization" style="display: none; margin-top: 20px;">
+                <h3 style="margin-bottom: 15px;">🌳 Full Search Tree (Sakana AI Style)</h3>
+
+                <!-- View Toggle -->
+                <div style="margin-bottom: 15px; display: flex; gap: 15px; align-items: center;">
+                    <button id="btn-tree-graph" class="btn" onclick="showTreeGraph()" style="background: #667eea;">Tree Graph View</button>
+                    <button id="btn-node-grid" class="btn btn-secondary" onclick="showNodeGrid()">Node Grid View</button>
+
+                    <div style="margin-left: auto;">
+                        <span id="tree-info" style="color: #6c757d; font-weight: bold;"></span>
+                    </div>
+                </div>
+
+                <!-- Tree Graph (D3.js) -->
+                <div id="tree-graph-container" style="background: white; border: 2px solid #e9ecef; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                    <svg id="tree-svg" width="100%" height="600"></svg>
+
+                    <!-- Legend -->
+                    <div id="tree-legend" style="margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px; display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 20px; height: 20px; border-radius: 50%; background: #ffd700; border: 3px solid #333;"></div>
+                            <span>Best Solution</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 20px; height: 20px; border-radius: 50%; background: #999; border: 2px solid #333;"></div>
+                            <span>Root</span>
+                        </div>
+                        <!-- Model colors will be added dynamically -->
+                    </div>
+                </div>
+
+                <!-- Tree Nodes Grid (Original) -->
+                <div id="tree-nodes-grid" style="display: none; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px;"></div>
+
+                <!-- Node Detail Modal -->
+                <div id="node-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 1000; overflow-y: auto; padding: 20px;">
+                    <div style="max-width: 900px; margin: 0 auto; background: white; border-radius: 15px; padding: 30px; position: relative;">
+                        <button onclick="closeNodeModal()" style="position: absolute; top: 15px; right: 15px; background: #dc3545; color: white; border: none; border-radius: 5px; padding: 8px 15px; cursor: pointer; font-weight: bold;">✕ Close</button>
+                        <div id="node-modal-content"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -582,12 +680,14 @@
         let multiModelModels = [];
         let selectedABMCTSModels = [];
         let selectedMultiModelModels = [];
+        let selectedJudgeModels = [];
 
         // Initialize dashboard
         document.addEventListener('DOMContentLoaded', function() {
             loadSystemStatus();
             loadABMCTSModels();
             loadMultiModelModels();
+            loadCriterionWeights();
             loadConfiguration();
             loadRuns();
         });
@@ -636,11 +736,13 @@
             try {
                 const response = await fetch(`${AB_MCTS_SERVICE}/models`);
                 const data = await response.json();
-                
+
                 if (data.success) {
                     abMCTSModels = data.models;
                     selectedABMCTSModels = data.current_models || [];
+                    selectedJudgeModels = data.judge_models || [];
                     renderABMCTSModels();
+                    renderJudgeModels();
                 } else {
                     throw new Error('Failed to load AB-MCTS models');
                 }
@@ -678,18 +780,16 @@
         // Load current configuration
         async function loadConfiguration() {
             try {
-                const response = await fetch(`${MODEL_INTEGRATION_SERVICE}/config`);
+                const response = await fetch(`${AB_MCTS_SERVICE}/config`);
                 const data = await response.json();
-                
-                if (data.configuration) {
-                    document.getElementById('ab-mcts-iterations').value = data.configuration.ab_mcts_iterations || 20;
-                    document.getElementById('ab-mcts-depth').value = data.configuration.ab_mcts_max_depth || 5;
+
+                if (data.success) {
+                    document.getElementById('ab-mcts-iterations').value = data.iterations || 20;
                 }
             } catch (error) {
                 console.log('Failed to load configuration:', error);
                 // Use defaults if config loading fails
                 document.getElementById('ab-mcts-iterations').value = 20;
-                document.getElementById('ab-mcts-depth').value = 5;
             }
         }
 
@@ -697,7 +797,7 @@
         function renderABMCTSModels() {
             const container = document.getElementById('ab-mcts-models');
             const modelsHtml = abMCTSModels.map(model => `
-                <div class="model-card ${selectedABMCTSModels.includes(model.name) ? 'selected' : ''}" 
+                <div class="model-card ${selectedABMCTSModels.includes(model.name) ? 'selected' : ''}"
                      onclick="toggleABMCTSModel('${model.name}')">
                     <h3>${model.name}</h3>
                     <div class="size">${model.size} parameters</div>
@@ -707,11 +807,37 @@
                     </div>
                 </div>
             `).join('');
-            
+
             container.innerHTML = `
                 <div class="model-grid">
                     ${modelsHtml}
                 </div>
+            `;
+        }
+
+        // Render judge models
+        function renderJudgeModels() {
+            const container = document.getElementById('ab-mcts-judges');
+            const modelsHtml = abMCTSModels.map(model => `
+                <div class="model-card ${selectedJudgeModels.includes(model.name) ? 'selected' : ''}"
+                     onclick="toggleJudgeModel('${model.name}')"
+                     style="${selectedJudgeModels.includes(model.name) ? 'border-color: #764ba2; background: linear-gradient(135deg, #f8f9fa, #f0e6ff);' : ''}">
+                    <h3>${model.name}</h3>
+                    <div class="size">${model.size} parameters</div>
+                    <div class="ratings">
+                        <span class="speed-rating">⚡ ${model.speed_rating}/5</span>
+                        <span class="quality-rating">🎯 ${model.quality_rating}/5</span>
+                    </div>
+                </div>
+            `).join('');
+
+            container.innerHTML = `
+                <div class="model-grid">
+                    ${modelsHtml}
+                </div>
+                <p style="color: #6c757d; font-size: 0.85rem; margin-top: 10px; font-style: italic;">
+                    💡 Currently selected: ${selectedJudgeModels.length} / 2 judges
+                </p>
             `;
         }
 
@@ -759,6 +885,23 @@
             renderMultiModelModels();
         }
 
+        // Toggle judge model selection (limit to 2)
+        function toggleJudgeModel(modelName) {
+            const index = selectedJudgeModels.indexOf(modelName);
+            if (index > -1) {
+                // Deselect
+                selectedJudgeModels.splice(index, 1);
+            } else {
+                // Select, but limit to 2
+                if (selectedJudgeModels.length >= 2) {
+                    showAlert('Maximum 2 judge models allowed. Deselect one first.', 'error');
+                    return;
+                }
+                selectedJudgeModels.push(modelName);
+            }
+            renderJudgeModels();
+        }
+
         // Update AB-MCTS models
         async function updateABMCTSModels() {
             if (selectedABMCTSModels.length === 0) {
@@ -774,7 +917,7 @@
                 });
 
                 const data = await response.json();
-                
+
                 if (data.success) {
                     showAlert('AB-MCTS models updated successfully!', 'success');
                 } else {
@@ -785,35 +928,132 @@
             }
         }
 
+        // Update judge models
+        async function updateJudgeModels() {
+            if (selectedJudgeModels.length === 0) {
+                showAlert('Please select at least one judge model (1-2 recommended)', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${AB_MCTS_SERVICE}/judges/update`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ judge_models: selectedJudgeModels })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showAlert(`Judge models updated successfully! Using ${selectedJudgeModels.length} judge(s): ${selectedJudgeModels.join(', ')}`, 'success');
+                } else {
+                    showAlert(`Failed to update judge models: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                showAlert(`Error updating judge models: ${error.message}`, 'error');
+            }
+        }
+
+        // Update criterion weight display
+        function updateWeightDisplay(criterion, value) {
+            document.getElementById(`weight-${criterion}-display`).textContent = `${value}%`;
+
+            // Calculate and display total
+            const total =
+                parseInt(document.getElementById('weight-accuracy').value) +
+                parseInt(document.getElementById('weight-completeness').value) +
+                parseInt(document.getElementById('weight-clarity').value) +
+                parseInt(document.getElementById('weight-relevance').value);
+
+            document.getElementById('weight-total-display').textContent = `${total}%`;
+        }
+
+        // Load criterion weights from config
+        async function loadCriterionWeights() {
+            try {
+                const response = await fetch(`${AB_MCTS_SERVICE}/config`);
+                const data = await response.json();
+
+                if (data.success && data.criterion_weights) {
+                    const weights = data.criterion_weights;
+
+                    // Convert to percentages and set sliders
+                    for (const [criterion, weight] of Object.entries(weights)) {
+                        const percentage = Math.round(weight * 100);
+                        const slider = document.getElementById(`weight-${criterion}`);
+                        if (slider) {
+                            slider.value = percentage;
+                            document.getElementById(`weight-${criterion}-display`).textContent = `${percentage}%`;
+                        }
+                    }
+
+                    // Update total
+                    const total = Object.values(weights).reduce((sum, w) => sum + Math.round(w * 100), 0);
+                    document.getElementById('weight-total-display').textContent = `${total}%`;
+                }
+            } catch (error) {
+                console.error('Error loading criterion weights:', error);
+            }
+        }
+
+        // Update criterion weights on server
+        async function updateCriterionWeights() {
+            try {
+                const weights = {
+                    accuracy: parseInt(document.getElementById('weight-accuracy').value) / 100,
+                    completeness: parseInt(document.getElementById('weight-completeness').value) / 100,
+                    clarity: parseInt(document.getElementById('weight-clarity').value) / 100,
+                    relevance: parseInt(document.getElementById('weight-relevance').value) / 100
+                };
+
+                const response = await fetch(`${AB_MCTS_SERVICE}/weights/update`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ weights })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    // Update display with normalized weights
+                    const normalized = data.weights;
+                    for (const [criterion, weight] of Object.entries(normalized)) {
+                        const percentage = Math.round(weight * 100);
+                        document.getElementById(`weight-${criterion}`).value = percentage;
+                        document.getElementById(`weight-${criterion}-display`).textContent = `${percentage}%`;
+                    }
+
+                    showAlert('Criterion weights updated successfully!', 'success');
+                } else {
+                    showAlert(`Failed to update weights: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                showAlert(`Error updating weights: ${error.message}`, 'error');
+            }
+        }
+
         // Update AB-MCTS parameters
         async function updateABMCTSParameters() {
             const iterations = parseInt(document.getElementById('ab-mcts-iterations').value);
-            const maxDepth = parseInt(document.getElementById('ab-mcts-depth').value);
 
             if (iterations < 1 || iterations > 100) {
                 alert('Iterations must be between 1 and 100');
                 return;
             }
 
-            if (maxDepth < 1 || maxDepth > 20) {
-                alert('Max depth must be between 1 and 20');
-                return;
-            }
-
             try {
-                const response = await fetch(`${MODEL_INTEGRATION_SERVICE}/config`, {
+                const response = await fetch(`${AB_MCTS_SERVICE}/params/update`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        ab_mcts_iterations: iterations,
-                        ab_mcts_max_depth: maxDepth
+                    body: JSON.stringify({
+                        iterations: iterations
                     })
                 });
 
                 const data = await response.json();
-                
+
                 if (data.success) {
-                    showAlert(`AB-MCTS parameters updated: ${iterations} iterations, depth ${maxDepth}`, 'success');
+                    showAlert(`AB-MCTS parameters updated: ${iterations} iterations (depth controlled by Thompson sampling)`, 'success');
                 } else {
                     showAlert(`Failed to update parameters: ${data.message}`, 'error');
                 }
@@ -1077,35 +1317,35 @@
         setInterval(checkABMCTSStatus, 2000);
 
         // Runs list
+        // Global state for tree viewer
+        let currentTreeData = null;
+
         async function loadRuns() {
             try {
-                const res = await fetch(`${API_BASE}/api/runs?limit=50`);
+                const res = await fetch(`${AB_MCTS_SERVICE}/runs?limit=50`);
                 const data = await res.json();
-                const rows = (data.runs || []).map(r => `
-                    <tr>
-                        <td>${new Date(r.started_at * 1000).toLocaleString()}</td>
-                        <td>${r.pipeline}</td>
-                        <td>${r.status}</td>
-                        <td><a href="#" onclick="viewRun('${r.run_id}')">Details</a></td>
-                    </tr>
+
+                if (!data.success || !data.runs || data.runs.length === 0) {
+                    document.getElementById('runs-list').innerHTML = `
+                        <p style="color: #6c757d; font-style: italic; padding: 10px;">No runs found. Run a query in Open WebUI to see results here.</p>
+                    `;
+                    return;
+                }
+
+                const runItems = data.runs.map(r => `
+                    <div onclick="viewRunTree('${r.run_id}')" style="padding: 12px; margin-bottom: 8px; border: 1px solid #e9ecef; border-radius: 8px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#f0f4ff'; this.style.borderColor='#667eea';" onmouseout="this.style.background='white'; this.style.borderColor='#e9ecef';">
+                        <div style="font-weight: bold; color: #2c3e50; margin-bottom: 5px;">
+                            ${r.pipeline.toUpperCase()} | ${r.status}
+                        </div>
+                        <div style="font-size: 0.85rem; color: #6c757d;">
+                            ${new Date(r.started_at * 1000).toLocaleString()}
+                        </div>
+                    </div>
                 `).join('');
-                document.getElementById('runs-table').innerHTML = `
-                    <table style="width:100%; border-collapse: collapse;">
-                        <thead>
-                            <tr>
-                                <th style="text-align:left; padding:8px; border-bottom:1px solid #e9ecef;">Started</th>
-                                <th style="text-align:left; padding:8px; border-bottom:1px solid #e9ecef;">Pipeline</th>
-                                <th style="text-align:left; padding:8px; border-bottom:1px solid #e9ecef;">Status</th>
-                                <th style="text-align:left; padding:8px; border-bottom:1px solid #e9ecef;">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${rows}
-                        </tbody>
-                    </table>
-                `;
+
+                document.getElementById('runs-list').innerHTML = runItems;
             } catch (err) {
-                document.getElementById('runs-table').innerHTML = `
+                document.getElementById('runs-list').innerHTML = `
                     <div class="alert alert-error">
                         <strong>Error:</strong> Failed to load runs: ${err.message}
                     </div>
@@ -1153,6 +1393,546 @@
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;');
         }
+
+        // ========== TREE VISUALIZATION FUNCTIONS ==========
+
+        async function viewRunTree(runId) {
+            console.log('viewRunTree called with runId:', runId);
+
+            try {
+                // Show loading indicator
+                document.getElementById('run-details').innerHTML = `
+                    <div class="loading show">
+                        <div class="spinner"></div>
+                        <p>Loading run data...</p>
+                    </div>
+                `;
+
+                console.log('Fetching run data from:', `${AB_MCTS_SERVICE}/runs/${runId}`);
+
+                // Fetch run details and tree data
+                const [runRes, treeRes] = await Promise.all([
+                    fetch(`${AB_MCTS_SERVICE}/runs/${runId}`),
+                    fetch(`${AB_MCTS_SERVICE}/runs/${runId}/tree`)
+                ]);
+
+                console.log('Response status:', runRes.status, treeRes.status);
+
+                const runData = await runRes.json();
+                const treeData = await treeRes.json();
+
+                console.log('Run data:', runData);
+                console.log('Tree data:', treeData);
+
+                if (!runData.success || !treeData.success) {
+                    showAlert('Failed to load run data', 'error');
+                    console.error('API returned success=false');
+                    return;
+                }
+
+                currentTreeData = treeData.tree_data;
+
+                // Display run details
+                displayRunDetails(runData.run);
+
+                // Check if this is old format or new format
+                const isOldFormat = 'iterations' in currentTreeData;
+                const hasTreeStructure = 'tree_structure' in currentTreeData;
+
+                if (isOldFormat && !hasTreeStructure) {
+                    // OLD FORMAT: Show message that tree visualization is not available
+                    document.getElementById('tree-visualization').style.display = 'block';
+                    document.getElementById('tree-info').innerHTML = `
+                        <span style="color: #ffc107;">⚠️ This run uses the old format. Tree visualization is only available for new runs.</span>
+                        <br>
+                        <span style="font-size: 0.9rem;">Run a new query to see the full tree visualization!</span>
+                    `;
+                    document.getElementById('tree-graph-container').innerHTML = `
+                        <div style="padding: 40px; text-align: center; color: #6c757d;">
+                            <h3>Tree Visualization Not Available</h3>
+                            <p>This run was created before tree visualization was added.</p>
+                            <p>Run a new AB-MCTS query to see the full search tree!</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                // NEW FORMAT: Show tree visualization
+                document.getElementById('tree-visualization').style.display = 'block';
+
+                // Update tree info
+                document.getElementById('tree-info').textContent =
+                    `${currentTreeData.total_nodes} nodes across ${currentTreeData.total_iterations} iterations`;
+
+                // Show tree graph view by default
+                showTreeGraph();
+
+            } catch (err) {
+                console.error('Error in viewRunTree:', err);
+                showAlert(`Error loading run tree: ${err.message}`, 'error');
+            }
+        }
+
+        function displayRunDetails(run) {
+            const params = run.parameters || {};
+            const result = run.result || {};
+
+            document.getElementById('run-details').innerHTML = `
+                <div style="margin-bottom: 15px;">
+                    <div style="font-weight: bold; font-size: 1.1rem; color: #2c3e50; margin-bottom: 10px;">
+                        ${run.pipeline.toUpperCase()} Run
+                    </div>
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 8px 15px; font-size: 0.9rem;">
+                        <strong>Status:</strong>
+                        <span style="color: ${run.status === 'completed' ? '#28a745' : '#ffc107'}; font-weight: bold;">
+                            ${run.status}
+                        </span>
+
+                        <strong>Query:</strong>
+                        <span style="font-style: italic;">"${run.user_query || 'N/A'}"</span>
+
+                        <strong>Models:</strong>
+                        <span>${(params.models || []).join(', ') || 'N/A'}</span>
+
+                        <strong>Judges:</strong>
+                        <span>${(params.judge_models || []).join(', ') || 'None'}</span>
+
+                        <strong>Iterations:</strong>
+                        <span>${params.iterations || 'N/A'}</span>
+
+                        <strong>Best Score:</strong>
+                        <span style="font-weight: bold; color: #667eea;">${(result.final_best_score || 0).toFixed(3)}</span>
+
+                        <strong>Started:</strong>
+                        <span>${new Date(run.started_at * 1000).toLocaleString()}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        // View toggle functions
+        function showTreeGraph() {
+            document.getElementById('tree-graph-container').style.display = 'block';
+            document.getElementById('tree-nodes-grid').style.display = 'none';
+            document.getElementById('btn-tree-graph').style.background = '#667eea';
+            document.getElementById('btn-tree-graph').classList.remove('btn-secondary');
+            document.getElementById('btn-node-grid').style.background = '#6c757d';
+            document.getElementById('btn-node-grid').classList.add('btn-secondary');
+
+            renderTreeGraph();
+        }
+
+        function showNodeGrid() {
+            document.getElementById('tree-graph-container').style.display = 'none';
+            document.getElementById('tree-nodes-grid').style.display = 'grid';
+            document.getElementById('btn-tree-graph').style.background = '#6c757d';
+            document.getElementById('btn-tree-graph').classList.add('btn-secondary');
+            document.getElementById('btn-node-grid').style.background = '#667eea';
+            document.getElementById('btn-node-grid').classList.remove('btn-secondary');
+
+            displayNodeGrid();
+        }
+
+        function displayNodeGrid() {
+            if (!currentTreeData || !currentTreeData.nodes) return;
+
+            const nodes = currentTreeData.nodes;
+
+            // Render nodes
+            const nodesHtml = nodes.map((node, idx) => {
+                const quality = (node.quality * 100).toFixed(1);
+                const judgeDetails = node.eval_results?.judge_details || {};
+                const numJudges = judgeDetails.num_judges || 0;
+
+                return `
+                    <div onclick="showNodeDetail(${idx})" style="
+                        border: 2px solid ${node.search_type === 'width' ? '#667eea' : '#764ba2'};
+                        border-radius: 10px;
+                        padding: 15px;
+                        cursor: pointer;
+                        background: linear-gradient(135deg, ${node.search_type === 'width' ? '#f0f4ff' : '#f0e6ff'}, white);
+                        transition: all 0.2s;
+                    " onmouseover="this.style.transform='translateY(-3px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)';" onmouseout="this.style.transform=''; this.style.boxShadow='';">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <span style="font-weight: bold; color: #2c3e50;">${node.model}</span>
+                            <span style="
+                                background: ${quality >= 70 ? '#28a745' : quality >= 40 ? '#ffc107' : '#dc3545'};
+                                color: white;
+                                padding: 4px 10px;
+                                border-radius: 12px;
+                                font-weight: bold;
+                                font-size: 0.85rem;
+                            ">${quality}%</span>
+                        </div>
+
+                        <div style="font-size: 0.85rem; color: #6c757d; margin-bottom: 8px;">
+                            <strong>${node.search_type === 'width' ? '🌐 Width' : '⬇️ Depth'} Search</strong>
+                            ${numJudges > 0 ? `| ${numJudges} Judge${numJudges > 1 ? 's' : ''}` : ''}
+                        </div>
+
+                        <div style="
+                            font-size: 0.9rem;
+                            color: #495057;
+                            line-height: 1.4;
+                            overflow: hidden;
+                            text-overflow: ellipsis;
+                            display: -webkit-box;
+                            -webkit-line-clamp: 3;
+                            -webkit-box-orient: vertical;
+                        ">${escapeHtml(node.preview || node.full_response?.substring(0, 150) || 'No preview')}</div>
+
+                        <div style="margin-top: 10px; font-size: 0.8rem; color: #007bff; font-weight: 500;">
+                            Click to view full response & judge details →
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('tree-nodes-grid').innerHTML = nodesHtml;
+        }
+
+        // ========== D3.JS TREE GRAPH VISUALIZATION ==========
+
+        function renderTreeGraph() {
+            if (!currentTreeData || !currentTreeData.tree_structure) return;
+
+            // Build hierarchical tree structure using backend tree_structure
+            const treeData = buildTreeHierarchy(currentTreeData.nodes, currentTreeData.tree_structure);
+
+            // Clear existing SVG
+            const svg = d3.select("#tree-svg");
+            svg.selectAll("*").remove();
+
+            // Get SVG dimensions
+            const svgElement = document.getElementById('tree-svg');
+            const width = svgElement.parentElement.clientWidth - 40;
+            const height = 600;
+
+            // Create tree layout
+            const treeLayout = d3.tree().size([width - 100, height - 100]);
+
+            // Create hierarchy
+            const root = d3.hierarchy(treeData);
+
+            // Generate tree layout
+            treeLayout(root);
+
+            // Create group for zoom/pan
+            const g = svg.append("g")
+                .attr("transform", "translate(50, 50)");
+
+            // Draw links (edges)
+            g.selectAll('.link')
+                .data(root.links())
+                .enter()
+                .append('path')
+                .attr('class', 'link')
+                .attr('d', d3.linkVertical()
+                    .x(d => d.x)
+                    .y(d => d.y))
+                .attr('fill', 'none')
+                .attr('stroke', '#999')
+                .attr('stroke-width', 2);
+
+            // Draw nodes
+            const nodes = g.selectAll('.node')
+                .data(root.descendants())
+                .enter()
+                .append('g')
+                .attr('class', 'node')
+                .attr('transform', d => `translate(${d.x},${d.y})`)
+                .style('cursor', 'pointer')
+                .on('click', function(event, d) {
+                    if (d.data.nodeData) {
+                        showNodeDetailFromGraph(d.data.nodeData);
+                    }
+                });
+
+            // Node circles
+            nodes.append('circle')
+                .attr('r', d => d.data.isBest ? 18 : 15)
+                .attr('fill', d => getNodeColor(d.data))
+                .attr('stroke', d => d.data.isBest ? '#000' : '#333')
+                .attr('stroke-width', d => d.data.isBest ? 3 : 2);
+
+            // Node labels (numbers)
+            nodes.append('text')
+                .attr('dy', 5)
+                .attr('text-anchor', 'middle')
+                .attr('fill', 'white')
+                .attr('font-weight', 'bold')
+                .attr('font-size', '12px')
+                .text(d => d.data.id || '');
+
+            // Add zoom behavior
+            svg.call(d3.zoom()
+                .scaleExtent([0.5, 3])
+                .on('zoom', (event) => {
+                    g.attr('transform', event.transform);
+                }));
+
+            // Update legend with model colors
+            updateLegend();
+        }
+
+        function updateLegend() {
+            const legend = document.getElementById('tree-legend');
+            if (!legend) return;
+
+            // Keep the base legend items
+            const baseItems = `
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; border-radius: 50%; background: #ffd700; border: 3px solid #333;"></div>
+                    <span>Best Solution</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; border-radius: 50%; background: #999; border: 2px solid #333;"></div>
+                    <span>Root</span>
+                </div>
+            `;
+
+            // Add model color items
+            const modelItems = Object.keys(modelColors).map(modelName => `
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; border-radius: 50%; background: ${modelColors[modelName]}; border: 2px solid #333;"></div>
+                    <span>${modelName}</span>
+                </div>
+            `).join('');
+
+            legend.innerHTML = baseItems + modelItems;
+        }
+
+        function buildTreeHierarchy(nodes, treeStructure) {
+            // Use the actual tree structure from the backend if available
+            if (treeStructure && treeStructure.children && treeStructure.children.length > 0) {
+                // Recursively convert backend tree structure to D3 hierarchy
+                const bestNode = nodes.reduce((best, node) =>
+                    (node.quality > (best?.quality || 0)) ? node : best, null);
+
+                function convertNode(backendNode, depth = 0) {
+                    // Find the corresponding node data from flat nodes list
+                    const nodeData = backendNode.id !== undefined && backendNode.id < nodes.length
+                        ? nodes[backendNode.id]
+                        : null;
+
+                    const result = {
+                        id: backendNode.id !== undefined ? backendNode.id + 1 : 0,
+                        name: backendNode.model || 'Root',
+                        quality: backendNode.quality || 0,
+                        searchType: backendNode.search_type,
+                        isBest: nodeData === bestNode,
+                        isRoot: backendNode.id === undefined || depth === 0,
+                        depth: depth,
+                        nodeData: nodeData ? {...nodeData, nodeIndex: backendNode.id} : null,
+                        children: []
+                    };
+
+                    // Recursively convert children
+                    if (backendNode.children && backendNode.children.length > 0) {
+                        result.children = backendNode.children.map(child => convertNode(child, depth + 1));
+                    }
+
+                    return result;
+                }
+
+                return convertNode(treeStructure);
+            }
+
+            // Fallback to flat structure if tree structure not available
+            const bestNode = nodes.reduce((best, node) =>
+                (node.quality > (best?.quality || 0)) ? node : best, null);
+
+            return {
+                id: 'Root',
+                name: 'Root',
+                isBest: false,
+                isRoot: true,
+                children: nodes.map((node, idx) => ({
+                    id: idx + 1,
+                    name: node.model,
+                    quality: node.quality,
+                    searchType: node.search_type,
+                    isBest: node === bestNode,
+                    nodeData: {...node, nodeIndex: idx}
+                }))
+            };
+        }
+
+        // Model color mapping (similar to Sakana AI style)
+        const modelColors = {};
+        const availableColors = ['#4CAF50', '#2196F3', '#FF5722', '#9C27B0', '#FF9800', '#00BCD4', '#E91E63', '#3F51B5'];
+        let colorIndex = 0;
+
+        function getModelColor(modelName) {
+            if (!modelName || modelName === 'unknown') return '#999';
+            if (!modelColors[modelName]) {
+                modelColors[modelName] = availableColors[colorIndex % availableColors.length];
+                colorIndex++;
+            }
+            return modelColors[modelName];
+        }
+
+        function getNodeColor(nodeData) {
+            if (nodeData.isRoot) return '#999';
+            if (nodeData.isBest) return '#ffd700'; // Gold for best
+
+            // Color by model type (like Sakana AI)
+            if (nodeData.name && nodeData.name !== 'Root') {
+                const modelColor = getModelColor(nodeData.name);
+
+                // Adjust opacity based on quality
+                const quality = (nodeData.quality || 0) * 100;
+                if (quality < 40) {
+                    // Fade color for low quality
+                    return modelColor + '80'; // 50% opacity
+                }
+                return modelColor;
+            }
+
+            // Fallback to quality-based coloring
+            const quality = (nodeData.quality || 0) * 100;
+            if (quality >= 70) return '#28a745'; // Green
+            if (quality >= 40) return nodeData.searchType === 'width' ? '#667eea' : '#764ba2'; // Blue/Purple
+            return '#dc3545'; // Red
+        }
+
+        function showNodeDetailFromGraph(nodeData) {
+            const node = nodeData;
+            if (!node) return;
+
+            const judgeDetails = node.eval_results?.judge_details || {};
+            const judges = Object.keys(judgeDetails).filter(k => !['final_score', 'num_judges'].includes(k));
+
+            let judgeHtml = '';
+            if (judges.length > 0) {
+                judgeHtml = `
+                    <div style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 10px;">
+                        <h3 style="margin-bottom: 15px; color: #764ba2;">⚖️ Judge Evaluations</h3>
+                        ${judges.map(judgeName => {
+                            const judge = judgeDetails[judgeName];
+                            return `
+                                <div style="margin-bottom: 15px; padding: 15px; background: white; border-radius: 8px; border-left: 4px solid #764ba2;">
+                                    <div style="font-weight: bold; color: #2c3e50; margin-bottom: 8px;">
+                                        ${judgeName}
+                                        ${(judge.score !== null && judge.score !== undefined && !isNaN(judge.score)) ? `<span style="float: right; color: #667eea;">${(judge.score * 100).toFixed(1)}%</span>` : ''}
+                                    </div>
+                                    ${judge.error ? `<div style="color: #dc3545; font-style: italic;">Error: ${judge.error}</div>` : ''}
+                                    ${judge.raw_response ? `<div style="font-size: 0.9rem; color: #6c757d; white-space: pre-wrap;">${escapeHtml(judge.raw_response)}</div>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                        <div style="margin-top: 15px; padding: 10px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border-radius: 8px; text-align: center; font-weight: bold;">
+                            Final Aggregated Score: ${((judgeDetails.final_score || 0) * 100).toFixed(1)}%
+                        </div>
+                    </div>
+                `;
+            }
+
+            document.getElementById('node-modal-content').innerHTML = `
+                <h2 style="color: #2c3e50; margin-bottom: 20px;">🔍 Node #${nodeData.nodeIndex + 1} Details</h2>
+
+                <div style="display: grid; grid-template-columns: auto 1fr; gap: 10px 20px; margin-bottom: 20px; font-size: 0.95rem;">
+                    <strong>Model:</strong> <span>${node.model}</span>
+                    <strong>Search Type:</strong> <span>${node.search_type === 'width' ? '🌐 Width Search' : '⬇️ Depth Search'}</span>
+                    <strong>Quality Score:</strong> <span style="font-weight: bold; color: #667eea;">${(node.quality * 100).toFixed(1)}%</span>
+                    <strong>Execution Time:</strong> <span>${(node.eval_results?.execution_time || 0).toFixed(2)}s</span>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <h3 style="margin-bottom: 10px; color: #2c3e50;">📄 Full Response</h3>
+                    <div style="
+                        padding: 20px;
+                        background: #f8f9fa;
+                        border-radius: 10px;
+                        border-left: 4px solid #667eea;
+                        max-height: 400px;
+                        overflow-y: auto;
+                        white-space: pre-wrap;
+                        font-family: 'Courier New', monospace;
+                        font-size: 0.9rem;
+                        line-height: 1.6;
+                    ">${escapeHtml(node.full_response || 'No response available')}</div>
+                </div>
+
+                ${judgeHtml}
+            `;
+
+            document.getElementById('node-modal').style.display = 'block';
+        }
+
+        function showNodeDetail(nodeIndex) {
+            if (!currentTreeData || !currentTreeData.nodes) return;
+            const node = currentTreeData.nodes[nodeIndex];
+            if (!node) return;
+
+            const judgeDetails = node.eval_results?.judge_details || {};
+            const judges = Object.keys(judgeDetails).filter(k => !['final_score', 'num_judges'].includes(k));
+
+            let judgeHtml = '';
+            if (judges.length > 0) {
+                judgeHtml = `
+                    <div style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 10px;">
+                        <h3 style="margin-bottom: 15px; color: #764ba2;">⚖️ Judge Evaluations</h3>
+                        ${judges.map(judgeName => {
+                            const judge = judgeDetails[judgeName];
+                            return `
+                                <div style="margin-bottom: 15px; padding: 15px; background: white; border-radius: 8px; border-left: 4px solid #764ba2;">
+                                    <div style="font-weight: bold; color: #2c3e50; margin-bottom: 8px;">
+                                        ${judgeName}
+                                        ${(judge.score !== null && judge.score !== undefined && !isNaN(judge.score)) ? `<span style="float: right; color: #667eea;">${(judge.score * 100).toFixed(1)}%</span>` : ''}
+                                    </div>
+                                    ${judge.error ? `<div style="color: #dc3545; font-style: italic;">Error: ${judge.error}</div>` : ''}
+                                    ${judge.raw_response ? `<div style="font-size: 0.9rem; color: #6c757d; white-space: pre-wrap;">${escapeHtml(judge.raw_response)}</div>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                        <div style="margin-top: 15px; padding: 10px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border-radius: 8px; text-align: center; font-weight: bold;">
+                            Final Aggregated Score: ${((judgeDetails.final_score || 0) * 100).toFixed(1)}%
+                        </div>
+                    </div>
+                `;
+            }
+
+            document.getElementById('node-modal-content').innerHTML = `
+                <h2 style="color: #2c3e50; margin-bottom: 20px;">🔍 Node Details</h2>
+
+                <div style="display: grid; grid-template-columns: auto 1fr; gap: 10px 20px; margin-bottom: 20px; font-size: 0.95rem;">
+                    <strong>Model:</strong> <span>${node.model}</span>
+                    <strong>Search Type:</strong> <span>${node.search_type === 'width' ? '🌐 Width Search' : '⬇️ Depth Search'}</span>
+                    <strong>Quality Score:</strong> <span style="font-weight: bold; color: #667eea;">${(node.quality * 100).toFixed(1)}%</span>
+                    <strong>Execution Time:</strong> <span>${(node.eval_results?.execution_time || 0).toFixed(2)}s</span>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <h3 style="margin-bottom: 10px; color: #2c3e50;">📄 Full Response</h3>
+                    <div style="
+                        padding: 20px;
+                        background: #f8f9fa;
+                        border-radius: 10px;
+                        border-left: 4px solid #667eea;
+                        max-height: 400px;
+                        overflow-y: auto;
+                        white-space: pre-wrap;
+                        font-family: 'Courier New', monospace;
+                        font-size: 0.9rem;
+                        line-height: 1.6;
+                    ">${escapeHtml(node.full_response || 'No response available')}</div>
+                </div>
+
+                ${judgeHtml}
+            `;
+
+            document.getElementById('node-modal').style.display = 'block';
+        }
+
+        function closeNodeModal() {
+            document.getElementById('node-modal').style.display = 'none';
+        }
+
+        // Close modal on escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeNodeModal();
+        });
     </script>
 </body>
 </html>

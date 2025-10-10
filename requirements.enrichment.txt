@@ -1,0 +1,13 @@
+# API Framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+
+# HTTP Client
+httpx==0.28.1
+
+# Chemistry and Materials Science
+rdkit==2023.9.6
+numpy==1.26.4
+mp-api==0.41.2
+pymatgen==2024.5.1

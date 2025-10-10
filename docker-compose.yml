@@ -137,6 +137,23 @@ services:
       - "host.docker.internal:host-gateway"
     command: ["python", "backend/model_integration.py"]
 
+  # Scientific Data Enrichment Service (Chemistry & Materials Science)
+  enrichment-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.enrichment
+    container_name: scientific-enrichment-api
+    ports:
+      - "8099:8099"
+    environment:
+      - MATERIALS_PROJECT_API_KEY=${MATERIALS_PROJECT_API_KEY:-}
+    networks:
+      - openwebui-net
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "enrichment_api.py"]
+
   http-server:
     build: .
     container_name: http-server
